@@ -1,0 +1,150 @@
+openapi: 3.1.0
+info:
+  title: FoodHelp API
+  version: 1.0.0
+  description: API familiar protegida; no incluye datos clinicos precargados.
+servers:
+  - url: /api
+security:
+  - familyBasicAuth: []
+components:
+  securitySchemes:
+    familyBasicAuth:
+      type: http
+      scheme: basic
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: { nullable: true }
+paths:
+  /health:
+    get:
+      security: []
+      responses:
+        '200': { description: Base de datos disponible }
+        '503': { description: Dependencia esencial no disponible }
+  /foods:
+    get:
+      responses:
+        '200': { description: Catálogo de alimentos }
+        '503': { description: Base de datos no disponible }
+    post:
+      responses:
+        '201': { description: Alimento capturado }
+        '422': { description: Validación fallida }
+  /people:
+    get:
+      responses:
+        '200': { description: Personas y estado de revisión }
+    post:
+      responses:
+        '201': { description: Persona creada }
+  /people/{personId}/prescriptions:
+    get:
+      parameters:
+        - { in: path, name: personId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Prescripciones mensuales completas con fecha, notas y alimentos preferidos }
+        '404': { description: Persona no encontrada }
+  /people/{personId}/prescriptions/{prescriptionId}:
+    delete:
+      parameters:
+        - { in: path, name: personId, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: prescriptionId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '204': { description: Prescripción y sus indicaciones eliminadas }
+        '404': { description: Prescripción no encontrada para esta persona }
+  /people/{personId}/prescription:
+    put:
+      parameters:
+        - { in: path, name: personId, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Prescripción mensual completa guardada en transacción }
+        '404': { description: Persona no encontrada }
+        '422': { description: Datos inválidos o no revisados }
+  /equivalents/calculate:
+    post:
+      responses:
+        '200': { description: Fracción exacta y decimal solo si es terminante }
+        '404': { description: Alimento no encontrado }
+        '422': { description: Unidad incompatible o datos inválidos }
+  /recipes:
+    get:
+      responses:
+        '200': { description: Resumen de recetas guardadas }
+    post:
+      responses:
+        '201': { description: Receta manual guardada como borrador o verificada contra la prescripción }
+        '422': { description: Ingredientes no coinciden con las equivalencias prescritas }
+  /recipes/matches:
+    post:
+      responses:
+        '200': { description: Recetas guardadas del perfil/tiempo ordenadas por ingredientes principales coincidentes }
+        '422': { description: Ingredientes seleccionados inválidos }
+  /recipes/generate:
+    post:
+      responses:
+        '201': { description: Propuestas IA guardadas solo después de verificar catálogo y equivalencias }
+        '409': { description: Falta prescripción revisada para el perfil/tiempo }
+        '422': { description: Ninguna propuesta cumplió las equivalencias }
+        '503': { description: Proveedor IA desactivado o no disponible }
+  /recipes/{id}:
+    get:
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Detalle de receta bajo demanda }
+        '404': { description: Receta no encontrada }
+    put:
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Receta editada como borrador o verificada contra las porciones del perfil }
+        '404': { description: Receta no encontrada }
+        '422': { description: Ingredientes no pertenecen al catálogo o exceden la prescripción }
+  /recipes/suggestions:
+    post:
+      responses:
+        '200': { description: Tres propuestas revisadas contra unidades del catálogo }
+        '409': { description: Datos familiares pendientes o recetas guardadas primero }
+        '503': { description: API opcional apagada o no disponible }
+  /menus/{weekStart}:
+    get:
+      parameters:
+        - { in: path, name: weekStart, required: true, schema: { type: string, format: date } }
+      responses:
+        '200': { description: Menú semanal guardado }
+        '404': { description: Menú no encontrado }
+  /menus/generate:
+    post:
+      responses:
+        '409': { description: Bloqueado por revisión clínica o falta de planificador aprobado }
+  /shopping-list/{weekStart}:
+    get:
+      parameters:
+        - { in: path, name: weekStart, required: true, schema: { type: string, format: date } }
+        - { in: query, name: peopleIds, required: true, schema: { type: array, items: { type: string, format: uuid } } }
+      responses:
+        '200': { description: Suma por alimento y unidad exacta }
+        '404': { description: Lista no disponible }
+        '422': { description: Personas no válidas }
+  /shopping-list/calculate:
+    post:
+      responses:
+        '200': { description: Lista exacta consolidada por comida, persona y duración individual }
+        '404': { description: Persona seleccionada no encontrada }
+        '409': { description: Receta no verificada o pendiente }
+        '422': { description: Falta seleccionar receta en algún tiempo de comida }
+  /exports/pdf:
+    post:
+      responses:
+        '200': { description: PDFKit transmitido sin almacenamiento }
+        '409': { description: No hay plan revisado para exportar }

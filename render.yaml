@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: foodhelp
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_AUTH_USERNAME
+        sync: false
+      - key: APP_AUTH_PASSWORD_HASH
+        sync: false
+      - key: DATABASE_URL
+        sync: false

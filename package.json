@@ -1,0 +1,14 @@
+{
+  "name": "foodhelp",
+  "private": true,
+  "workspaces": ["packages/contracts", "services/foodhelp-api", "services/foodhelp-web"],
+  "scripts": {
+    "build": "npm run build --workspace=@foodhelp/contracts && npm run build --workspace=@foodhelp/api && npm run build --workspace=@foodhelp/web",
+    "test": "npm run test --workspace=@foodhelp/contracts && npm run test --workspace=@foodhelp/api && npm run test --workspace=@foodhelp/web",
+    "dev": "npm run dev --workspace=@foodhelp/api",
+    "start": "npm run start --workspace=@foodhelp/api",
+    "auth:hash": "node scripts/hash-password.cjs"
+  },
+  "engines": { "node": ">=20" },
+  "devDependencies": { "typescript": "^5.9.2" }
+}
