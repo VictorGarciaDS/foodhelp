@@ -21,6 +21,10 @@ Las migraciones de catalogo y prescripciones incluyen solo datos proporcionados 
 
 ## Base de datos
 
+Al seleccionar un alimento en Recetas, la cantidad sugerida cubre las porciones restantes de su grupo para el perfil y tiempo seleccionados. Otros ingredientes del mismo grupo se descuentan antes de sugerir la cantidad. Excesos y faltantes se muestran como alertas exactas; no impiden guardar un borrador. Verificar sigue requiriendo que todos los grupos y equivalencias coincidan con la prescripcion. Los alimentos libres no reciben cantidades inventadas.
+
+La integracion de completions envia `prompt` y `system_prompt`, sin `messages`: el proveedor prioriza `messages` e ignora los prompts cuando ese campo esta presente. Usa `max_tokens=6000` (se traduce a `max_completion_tokens` en el servicio) y lee el JSON de recetas desde la propiedad `text` de la respuesta. Solo se guardan propuestas que pasan la validacion exacta del servidor. La clave permanece exclusivamente en el backend.
+
 Desde Personas se consultan las prescripciones mensuales completas, se agregan meses y se editan todas sus indicaciones. El editor conserva fecha de consulta, verduras libres, alimentos preferidos y notas. Eliminar requiere confirmacion y borra la prescripcion con sus filas; no borra a la persona. El mes de una prescripcion existente no se cambia desde el editor.
 
 La migracion `0005_recipe_drafts.sql` guarda las siete propuestas de Patricia como borradores, con texto original y pendientes de revision. Recetas permite abrir su detalle; estos borradores no estan verificados ni se usan como recetas aprobadas para generar menus. No se inventan ingredientes normalizados ni pasos de preparacion.

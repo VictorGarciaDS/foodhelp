@@ -32,8 +32,16 @@ describe('completion API response contract', () => {
     const body = JSON.parse(request.body as string);
     expect(url).toBe('https://api.example.test/v1/completions');
     expect(request.headers['x-student-key']).toBe('test-key');
-    expect(body).toMatchObject({ model: 'gpt-5', prompt: 'contexto', temperature: 1, max_tokens: 0 });
-    expect(body.messages[0].role).toBe('system');
+    expect(body).toMatchObject({ model: 'gpt-5', prompt: 'contexto', temperature: 1, max_tokens: 6000 });
+    expect(body.system_prompt).toBeTypeOf('string');
+    expect(body).not.toHaveProperty('messages');
+  });
+
+  it('reads the actual provider text envelope with usage and credits', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      text: JSON.stringify({ suggestions }), usage: { total_tokens: 200 }, credits_left: 10,
+    }), { status: 200 })));
+    await expect(requestRecipeProposals('prescripción y catálogo')).resolves.toEqual(suggestions);
   });
 
   it('accepts a JSON string inside an OpenAI-compatible choices envelope', async () => {

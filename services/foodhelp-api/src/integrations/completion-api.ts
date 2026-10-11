@@ -14,6 +14,7 @@ function extractSuggestions(payload: unknown): RecipeCandidate[] {
   if (!payload || typeof payload !== 'object') throw new Error('Respuesta sin objeto JSON.');
   const object = payload as Record<string, unknown>;
   if (object.suggestions !== undefined) return suggestionsSchema.parse(object.suggestions);
+  if (typeof object.text === 'string') return extractSuggestions(object.text);
   if (Array.isArray(object.choices) && object.choices.length) {
     const choice = object.choices[0] as Record<string, unknown>;
     const message = choice.message as Record<string, unknown> | undefined;
@@ -48,9 +49,8 @@ export async function requestRecipeProposals(context: string): Promise<RecipeCan
         model: config.AI_MODEL,
         prompt: context,
         system_prompt: systemPrompt,
-        messages: [{ role: 'system', content: systemPrompt }],
         temperature: 1,
-        max_tokens: 0,
+        max_tokens: 6000,
       }),
       signal: AbortSignal.timeout(60000),
     });

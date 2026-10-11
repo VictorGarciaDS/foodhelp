@@ -6,6 +6,7 @@ import { api } from '../api';
 import type { RecipeDetail, RecipeIngredient, RecipeMatch, RecipeSummary } from '../api/types';
 import { PageFrame, SectionHeading } from '../components/PageFrame';
 import { useResource } from '../hooks/useResource';
+import { defaultIngredientQuantity, prescriptionAlerts } from '../utils/recipe-portions';
 
 type MainIngredientRow = { key: string; group: FoodGroup | ''; foodId: string };
 
@@ -38,12 +39,15 @@ export function RecipesPage() {
     prescriptionPersonId,
   );
   const currentPrescription = prescriptions?.[0];
-  const prescribedGroups = currentPrescription?.meals.filter((meal) => meal.mealTime === editor?.mealTime).map((meal) => meal.group) ?? [];
-  const missingGroups = [...new Set(prescribedGroups)].filter((group) => !editor?.ingredients.some((ingredient) => ingredient.group === group));
+  const prescriptionReady = currentPrescription?.personId === prescriptionPersonId && !prescriptionsBusy && !prescriptionsError;
+  const prescribedMeals = prescriptionReady ? currentPrescription.meals.filter((meal) => meal.mealTime === editor?.mealTime) : [];
+  const prescribedGroups = prescribedMeals.map((meal) => meal.group);
+  const missingGroups = [...new Set(prescribedGroups)].filter((group) => !editor?.ingredients.some((ingredient) => ingredient.group === group && ingredient.foodId));
+  const portionAlerts = editor && prescribedMeals.length ? prescriptionAlerts(prescribedMeals, editor.ingredients, foods ?? []) : [];
   const mainFoodIds = mainIngredients.map((ingredient) => ingredient.foodId).filter(Boolean);
   const mainIngredientsComplete = mainIngredients.length > 0 && mainIngredients.every((ingredient) => ingredient.group && ingredient.foodId)
     && new Set(mainFoodIds).size === mainFoodIds.length;
-  const canVerify = Boolean(editor && currentPrescription && !prescriptionsBusy && !prescriptionsError
+  const canVerify = Boolean(editor && prescriptionReady && prescribedMeals.length && portionAlerts.length === 0
     && missingGroups.length === 0 && editor.reviewNotes.length === 0 && editor.ingredients.length > 0
     && editor.instructions.length > 0 && editor.instructions.every((instruction) => instruction.trim().length > 0));
 
@@ -87,7 +91,7 @@ export function RecipesPage() {
       foodId,
       group: food.group,
       isFreeConsumption: free,
-      quantity: free ? null : '1',
+      quantity: defaultIngredientQuantity(food, prescribedMeals, editor?.ingredients ?? [], index, foods ?? []),
       unit: free ? null : food.unit,
     });
   }
@@ -215,15 +219,17 @@ export function RecipesPage() {
                 <Field label="Pendientes de revisión"><Textarea resize="vertical" placeholder="Una nota pendiente por línea; deja vacío para confirmar que se resolvieron." value={editor.reviewNotes.join('\n')} onChange={(_event, value) => setEditor({ ...editor, reviewNotes: value.value.split('\n').map((note) => note.trim()).filter(Boolean), verify: false })} /></Field>
                 <section className="recipe-ingredients-editor">
                   <h3>Ingredientes por persona</h3>
+                  {prescriptionsBusy && <p role="status">Cargando porciones de la prescripción...</p>}
                   <p>Las cantidades se registran por una ración de la receta y se suman sin convertir unidades.</p>
                   {editor.ingredients.map((ingredient, index) => (
                     <div className="recipe-ingredient-row" key={`${index}-${ingredient.foodId}`}>
                       <Field label={`Tipo de alimento ${index + 1}`} required><Select value={ingredient.group} onChange={(event) => selectFoodGroup(index, event.currentTarget.value as FoodGroup)}>{foodGroups.map((group) => <option key={group} value={group}>{group === 'Proteinas' ? 'Proteínas' : group === 'Azucar' ? 'Azúcar' : group === 'Lacteos' ? 'Lácteos' : group}</option>)}</Select></Field>
-                      <Field label={`Alimento ${index + 1}`} required><Select value={ingredient.foodId} onChange={(event) => selectFood(index, event.currentTarget.value)}><option value="">Seleccionar alimento verificado</option>{(foods ?? []).filter((food) => food.group === ingredient.group && food.verifiedAt && !food.portionPending && food.isFreeConsumption === ingredient.isFreeConsumption).map((food) => <option key={food.id} value={food.id}>{food.name}</option>)}</Select></Field>
+                      <Field label={`Alimento ${index + 1}`} required><Select disabled={prescriptionsBusy || !!prescriptionsError || (!!currentPrescription && !prescriptionReady)} value={ingredient.foodId} onChange={(event) => selectFood(index, event.currentTarget.value)}><option value="">Seleccionar alimento verificado</option>{(foods ?? []).filter((food) => food.group === ingredient.group && food.verifiedAt && !food.portionPending && food.isFreeConsumption === ingredient.isFreeConsumption).map((food) => <option key={food.id} value={food.id}>{food.name}</option>)}</Select></Field>
                       {ingredient.isFreeConsumption ? <div className="free-purchase-fields"><p className="free-ingredient-label">Libre para equivalencias. Indica cantidad solo si quieres sumarla a compras.</p><Field label="Cantidad para compras"><Input placeholder="Ej. 2" value={ingredient.quantity ?? ''} onChange={(_event, value) => updateIngredient(index, { quantity: value.value || null })} /></Field><Field label="Unidad de compra"><Input placeholder="Ej. tazas" value={ingredient.unit ?? ''} onChange={(_event, value) => updateIngredient(index, { unit: value.value || null })} /></Field></div> : <Field label={`Cantidad (${ingredient.unit ?? 'unidad'})`} required><Input required placeholder="Ej. 1/2" value={ingredient.quantity ?? ''} onChange={(_event, value) => updateIngredient(index, { quantity: value.value || null, group: ingredient.group })} /></Field>}
                       <Button type="button" icon={<DeleteRegular />} aria-label={`Quitar ingrediente ${index + 1}`} title="Quitar ingrediente" onClick={() => setEditor({ ...editor, verify: false, ingredients: editor.ingredients.filter((_item, itemIndex) => itemIndex !== index) })} />
                     </div>
                   ))}
+                  {portionAlerts.length > 0 && <MessageBar intent="warning"><MessageBarBody><ul>{portionAlerts.map((alert) => <li key={alert}>{alert}</li>)}</ul>Las diferencias no impiden guardar como borrador.</MessageBarBody></MessageBar>}
                   <Button type="button" icon={<AddRegular />} disabled={!foods?.some((food) => food.verifiedAt && !food.portionPending)} onClick={() => setEditor({ ...editor, verify: false, ingredients: [...editor.ingredients, { foodId: '', quantity: null, unit: null, group: 'Frutas', isFreeConsumption: false }] })}>Añadir ingrediente</Button>
                 </section>
                 <section className="recipe-steps-editor"><h3>Preparación</h3>{editor.instructions.map((instruction, index) => <div className="recipe-ingredient-row" key={index}><Field label={`Paso ${index + 1}`} required><Input required value={instruction} onChange={(_event, value) => setEditor({ ...editor, verify: false, instructions: editor.instructions.map((step, stepIndex) => stepIndex === index ? value.value : step) })} /></Field><Button type="button" icon={<DeleteRegular />} aria-label={`Quitar paso ${index + 1}`} title="Quitar paso" onClick={() => setEditor({ ...editor, verify: false, instructions: editor.instructions.filter((_step, stepIndex) => stepIndex !== index) })} /></div>)}<Button type="button" icon={<AddRegular />} onClick={() => setEditor({ ...editor, verify: false, instructions: [...editor.instructions, ''] })}>Añadir paso</Button></section>
