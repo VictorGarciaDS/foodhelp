@@ -17,6 +17,11 @@ export function FoodsPage() {
   const [purchaseUnitName, setPurchaseUnitName] = useState('');
   const [purchaseQuantity, setPurchaseQuantity] = useState('');
   const [purchaseIngredientUnit, setPurchaseIngredientUnit] = useState('tazas');
+  const [purchaseOutputQuantity, setPurchaseOutputQuantity] = useState('1');
+  const [purchaseOutputUnit, setPurchaseOutputUnit] = useState('paquetes');
+  const [purchaseApproximate, setPurchaseApproximate] = useState(false);
+  const [purchaseConfirmed, setPurchaseConfirmed] = useState(false);
+  const [purchaseRoundUp, setPurchaseRoundUp] = useState(true);
   const [equivalent, setEquivalent] = useState<EquivalentResult | null>(null);
   const [equivalentError, setEquivalentError] = useState<string | null>(null);
   const { data, busy, error } = useResource<Food[]>(() => api.listFoods(), retryKey);
@@ -86,7 +91,11 @@ export function FoodsPage() {
     }
     try {
       const purchaseUnits = (selectedFood.purchaseUnits ?? []).filter((unit) => unit.unitName.toLocaleLowerCase('es') !== purchaseUnitName.trim().toLocaleLowerCase('es'));
-      purchaseUnits.push({ unitName: purchaseUnitName.trim(), quantity: purchaseQuantity.trim(), unit: purchaseIngredientUnit.trim() });
+      purchaseUnits.push({
+        unitName: purchaseUnitName.trim(), quantity: purchaseQuantity.trim(), unit: purchaseIngredientUnit.trim(),
+        purchaseQuantity: purchaseOutputQuantity.trim(), purchaseUnit: purchaseOutputUnit.trim(),
+        isConfirmed: purchaseConfirmed, isApproximate: purchaseApproximate, roundUp: purchaseRoundUp,
+      });
       await api.setFoodPurchaseUnits(selectedFood.id, purchaseUnits);
       setFormMessage('Unidad de compra guardada.');
       setRetryKey((value) => value + 1);
@@ -104,8 +113,8 @@ export function FoodsPage() {
         <Card appearance="outline" className="table-frame">
           <Table aria-label="Alimentos guardados por grupo">
               <TableHeader><TableRow><TableHeaderCell>Grupo</TableHeaderCell><TableHeaderCell>Alimento</TableHeaderCell><TableHeaderCell>Cantidad base</TableHeaderCell><TableHeaderCell>Unidad</TableHeaderCell><TableHeaderCell>Estado</TableHeaderCell><TableHeaderCell>Unidades de compra</TableHeaderCell></TableRow></TableHeader>
-            <TableBody>
-                {foods.map((food) => <TableRow key={food.id}><TableCell>{food.group === 'Proteinas' ? 'Proteínas' : food.group === 'Azucar' ? 'Azúcar' : food.group === 'Lacteos' ? 'Lácteos' : food.group}</TableCell><TableCell>{food.name}</TableCell><TableCell>{food.portionPending ? 'Porción pendiente' : food.isFreeConsumption ? 'Libre' : food.baseQuantity}</TableCell><TableCell>{food.portionPending ? 'Por confirmar' : food.isFreeConsumption ? 'Sin porción' : food.unit}</TableCell><TableCell><span className={`status-pill ${food.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{food.verifiedAt ? 'Verificado' : 'Pendiente'}</span></TableCell><TableCell>{(food.purchaseUnits ?? []).map((unit) => `${unit.unitName}: ${unit.quantity} ${unit.unit}`).join(' · ') || '—'}</TableCell></TableRow>)}
+              <TableBody>
+                {foods.map((food) => <TableRow key={food.id}><TableCell>{food.group === 'Proteinas' ? 'Proteínas' : food.group === 'Azucar' ? 'Azúcar' : food.group === 'Lacteos' ? 'Lácteos' : food.group}</TableCell><TableCell>{food.name}</TableCell><TableCell>{food.portionPending ? 'Porción pendiente' : food.isFreeConsumption ? 'Libre' : food.baseQuantity}</TableCell><TableCell>{food.portionPending ? 'Por confirmar' : food.isFreeConsumption ? 'Sin porción' : food.unit}</TableCell><TableCell><span className={`status-pill ${food.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{food.verifiedAt ? 'Verificado' : 'Pendiente'}</span></TableCell><TableCell>{(food.purchaseUnits ?? []).map((unit) => `${unit.isConfirmed ? '' : 'Por confirmar · '}${unit.isApproximate ? '~' : ''}${unit.unitName}: ${unit.purchaseQuantity} ${unit.purchaseUnit} por ${unit.quantity} ${unit.unit}`).join(' · ') || 'Por confirmar'}</TableCell></TableRow>)}
                 {foods.length === 0 && foodGroups.map((group) => <TableRow key={group}><TableCell>{group}</TableCell><TableCell colSpan={3}>Sin alimentos cargados</TableCell><TableCell><span className="status-pill status-pending">Sin verificar</span></TableCell><TableCell>—</TableCell></TableRow>)}
             </TableBody>
           </Table>
@@ -136,10 +145,17 @@ export function FoodsPage() {
           <Field label="Alimento" required><Select value={selectedFoodId} onChange={(event) => setSelectedFoodId(event.currentTarget.value)} required><option value="" disabled>Seleccionar alimento</option>{foods.map((food) => <option key={food.id} value={food.id}>{food.name}</option>)}</Select></Field>
           <div className="form-pair">
             <Field label="Nombre del empaque" required><Input value={purchaseUnitName} onChange={(_event, value) => setPurchaseUnitName(value.value)} placeholder="paquetes" required maxLength={80} /></Field>
-            <Field label="Contenido por empaque" required><Input value={purchaseQuantity} onChange={(_event, value) => setPurchaseQuantity(value.value)} placeholder="11 o 1/2" required /></Field>
+            <Field label="Contenido en unidad de receta" required><Input value={purchaseQuantity} onChange={(_event, value) => setPurchaseQuantity(value.value)} placeholder="12" required /></Field>
           </div>
-          <Field label="Unidad del contenido" required><Input value={purchaseIngredientUnit} onChange={(_event, value) => setPurchaseIngredientUnit(value.value)} disabled={Boolean(selectedFood && !selectedFood.isFreeConsumption)} required maxLength={80} /></Field>
-          {selectedFood?.purchaseUnits?.length ? <p className="field-note">Configuradas: {selectedFood.purchaseUnits.map((unit) => `${unit.unitName} = ${unit.quantity} ${unit.unit}`).join(' · ')}</p> : null}
+          <Field label="Unidad de receta" required><Input value={purchaseIngredientUnit} onChange={(_event, value) => setPurchaseIngredientUnit(value.value)} disabled={Boolean(selectedFood && !selectedFood.isFreeConsumption)} required maxLength={80} /></Field>
+          <div className="form-pair">
+            <Field label="Cantidad que se compra" required><Input value={purchaseOutputQuantity} onChange={(_event, value) => setPurchaseOutputQuantity(value.value)} placeholder="1 o 175" required /></Field>
+            <Field label="Unidad que se compra" required><Input value={purchaseOutputUnit} onChange={(_event, value) => setPurchaseOutputUnit(value.value)} placeholder="paquetes, g" required maxLength={80} /></Field>
+          </div>
+          <Field><Checkbox checked={purchaseConfirmed} onChange={(_event, value) => setPurchaseConfirmed(Boolean(value.checked))} label="Tamaño confirmado" /></Field>
+          <Field><Checkbox checked={purchaseApproximate} onChange={(_event, value) => setPurchaseApproximate(Boolean(value.checked))} label="Es una equivalencia aproximada" /></Field>
+          <Field><Checkbox checked={purchaseRoundUp} onChange={(_event, value) => setPurchaseRoundUp(Boolean(value.checked))} label="Redondear hacia arriba (paquetes indivisibles)" /></Field>
+          {selectedFood?.purchaseUnits?.length ? <p className="field-note">Configuradas: {selectedFood.purchaseUnits.map((unit) => `${unit.isConfirmed ? '' : 'por confirmar · '}${unit.isApproximate ? '~' : ''}${unit.unitName}: ${unit.purchaseQuantity} ${unit.purchaseUnit} por ${unit.quantity} ${unit.unit}`).join(' · ')}</p> : null}
           {formError && <p className="form-error" role="alert">{formError}</p>}
           {formMessage && <p className="form-success" role="status">{formMessage}</p>}
           <div className="action-row action-row-start"><Button type="submit" appearance="primary" icon={<AddRegular />} disabled={!selectedFood}>Guardar unidad de compra</Button></div>

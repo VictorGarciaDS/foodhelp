@@ -19,6 +19,27 @@ describe('foodhelp schema migration', () => {
     expect(migration).toContain('REFERENCES foodhelp.foods(id) ON DELETE CASCADE');
     expect(migration).toContain("SELECT id, 'paquetes', '11', 'rebanadas'");
   });
+  it('supports confirmed and approximate purchase conversions and recipe image attribution', () => {
+    const migration = readFileSync(resolve(__dirname, '0007_purchase_measurements_and_recipe_images.sql'), 'utf8');
+    expect(migration).toContain('ADD COLUMN purchase_quantity');
+    expect(migration).toContain('ADD COLUMN is_confirmed');
+    expect(migration).toContain('ADD COLUMN is_approximate');
+    expect(migration).toContain("SET quantity = '12'");
+    expect(migration).toContain('ADD COLUMN image_attribution');
+  });
+  it('seeds only stated or standard purchase conversions and user-provided approximations', () => {
+    const migration = readFileSync(resolve(__dirname, '0008_food_purchase_defaults.sql'), 'utf8');
+    expect(migration).toContain("WHERE unit = 'g'");
+    expect(migration).toContain("SELECT id, 'docenas', '12', 'piezas', '1', 'docenas'");
+    expect(migration).toContain("SELECT id, 'gramos aproximados', '12', 'piezas', '60', 'g'");
+    expect(migration).toContain("SELECT id, 'gramos aproximados', '1', 'piezas', '175', 'g'");
+  });
+  it('marks foods without a confirmed conversion instead of inventing a package size', () => {
+    const migration = readFileSync(resolve(__dirname, '0009_unconfirmed_purchase_units.sql'), 'utf8');
+    expect(migration).toContain("'empaque por confirmar'");
+    expect(migration).toContain('false, false, true');
+    expect(migration).toContain('WHERE NOT EXISTS');
+  });
   it('simplifies people and confirms Ades without saving unreviewed recipes', () => {
     const migration = readFileSync(resolve(__dirname, '0004_people_and_food_corrections.sql'), 'utf8');
     expect(migration.match(/ALTER TABLE foodhelp.people DROP COLUMN/g)).toHaveLength(3);

@@ -93,3 +93,10 @@ export function divideRoundUp(amountValue: string, packageSizeValue: string): st
   const denominator = amount.denominator * packageSize.numerator;
   return ((numerator + denominator - 1n) / denominator).toString();
 }
+
+export function multiplyAmounts(leftValue: string, rightValue: string): string {
+  const left = parseAmount(leftValue);
+  const right = parseAmount(rightValue);
+  const result = multiply(left, right);
+  return result.denominator === 1n ? result.numerator.toString() : `${result.numerator}/${result.denominator}`;
+}

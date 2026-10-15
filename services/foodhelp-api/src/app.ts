@@ -14,7 +14,7 @@ export function createApp(): express.Express {
   app.set('trust proxy', 1);
   app.use(helmet({ contentSecurityPolicy: { directives: {
     defaultSrc: ["'self'"], scriptSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"],
-    imgSrc: ["'self'", 'data:'], connectSrc: ["'self'"], fontSrc: ["'self'", 'data:'],
+    imgSrc: ["'self'", 'data:', 'https://upload.wikimedia.org'], connectSrc: ["'self'"], fontSrc: ["'self'", 'data:'],
   } } }));
   app.use(express.json({ limit: '1mb' }));
 

@@ -4,13 +4,13 @@ import type {
 
 export type PageState = 'data' | 'loading' | 'empty' | 'error';
 export type WeekDay = { day: string; menuCount: string; status: string };
-export type RecipeSummary = { id: string; name: string; verifiedAt: string | null; personId: string | null; personName: string | null; mealTime: string | null; reviewNotes: string[] };
+export type RecipeSummary = { id: string; name: string; verifiedAt: string | null; personId: string | null; personName: string | null; mealTime: string | null; reviewNotes: string[]; imageUrl: string | null; imageAttribution: string | null; imageLicense: string | null };
 export type RecipeMatch = RecipeSummary & { matchCount: number; matchedFoodIds: string[] };
 export type RecipeIngredient = RecipeCandidate['ingredients'][number];
 export type RecipeDetail = RecipeSummary & { instructions: string[]; ingredients: RecipeIngredient[]; sourceText: string | null };
 export type ShoppingPlan = { days: number; peopleCount: number; participants: { personId: string; meals: { mealTime: 'Desayuno' | 'Almuerzo' | 'Comida' | 'Cena'; recipeIds: string[] }[] }[] };
 export type GeneratedShoppingList = { days: number; participantCount: number; peopleCount: number; participants: { personId: string; days: number }[]; usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[]; items: ShoppingItem[] };
-export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string; purchaseOptions: { unitName: string; quantity: string; contents: string; unit: string }[] };
+export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string; purchaseOptions: { unitName: string; quantity: string; contents: string; unit: string; purchaseUnit: string; isApproximate: boolean }[]; purchasePending: boolean };
 export type FoodPurchaseUnit = Food['purchaseUnits'][number];
 export type PrescriptionInput = {
   month: string;

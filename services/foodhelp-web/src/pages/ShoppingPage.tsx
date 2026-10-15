@@ -13,6 +13,9 @@ type MenuDay = { key: string; meals: Record<MealTime, string> };
 const emptyMeals = (): Record<MealTime, string> => ({ Desayuno: '', Almuerzo: '', Comida: '', Cena: '' });
 const createDay = (): MenuDay => ({ key: crypto.randomUUID(), meals: emptyMeals() });
 const amountForDisplay = (value: string) => value.replace('/', ' / ');
+const purchaseUnitForDisplay = (quantity: string, unit: string) => quantity === '1'
+  ? ({ paquetes: 'paquete', docenas: 'docena', kilogramos: 'kilogramo', litros: 'litro', gramos: 'gramo', mililitros: 'mililitro' }[unit] ?? unit)
+  : unit;
 
 export function ShoppingPage() {
   const { data: people, busy: peopleBusy, error: peopleError } = useResource<Person[]>(() => api.listPeople(), 0);
@@ -99,7 +102,7 @@ export function ShoppingPage() {
       {result && <section className="content-section shopping-results">
         <div className="shopping-planner-heading"><SectionHeading detail={`${result.days} días · ${result.peopleCount} personas`}>Lista consolidada</SectionHeading><div className="action-row action-row-start"><Button icon={<PrintRegular />} disabled={!result.items.length} onClick={() => window.print()}>Imprimir</Button><Button icon={<DocumentRegular />} disabled title="PDF de esta lista estará disponible después">PDF</Button></div></div>
         <p className="field-note">Las cantidades incluyen a todos los comensales. Las verduras libres sin medida física se cuentan como porciones de receta.</p>
-        {result.items.length ? <Card appearance="outline" className="table-frame"><Table aria-label="Lista de compras calculada"><TableHeader><TableRow><TableHeaderCell>Alimento</TableHeaderCell><TableHeaderCell>Cantidad total</TableHeaderCell><TableHeaderCell>Unidad</TableHeaderCell><TableHeaderCell>Compra</TableHeaderCell></TableRow></TableHeader><TableBody>{result.items.map((item) => <TableRow key={`${item.foodId}-${item.unit}`}><TableCell>{item.name}</TableCell><TableCell>{amountForDisplay(item.quantity)}</TableCell><TableCell>{item.unit}</TableCell><TableCell>{item.purchaseOptions.length ? item.purchaseOptions.map((option) => `${option.quantity} ${option.unitName} (${amountForDisplay(option.contents)} ${option.unit})`).join(' · ') : '—'}</TableCell></TableRow>)}</TableBody></Table></Card> : <Card appearance="outline" className="empty-inline"><ShoppingBagRegular /><strong>La selección no requiere ingredientes medidos</strong><span>Los ingredientes libres sin cantidad física no se pueden sumar a la compra.</span></Card>}
+        {result.items.length ? <Card appearance="outline" className="table-frame"><Table aria-label="Lista de compras calculada"><TableHeader><TableRow><TableHeaderCell>Alimento</TableHeaderCell><TableHeaderCell>Cantidad total</TableHeaderCell><TableHeaderCell>Unidad</TableHeaderCell><TableHeaderCell>Compra</TableHeaderCell></TableRow></TableHeader><TableBody>{result.items.map((item) => <TableRow key={`${item.foodId}-${item.unit}`}><TableCell>{item.name}</TableCell><TableCell>{amountForDisplay(item.quantity)}</TableCell><TableCell>{item.unit}</TableCell><TableCell>{[...item.purchaseOptions.map((option) => `${option.quantity} ${purchaseUnitForDisplay(option.quantity, option.purchaseUnit)}${option.isApproximate ? ' aprox.' : ''} (${amountForDisplay(option.contents)} ${option.unit})`), ...(item.purchasePending ? ['Empaque por confirmar'] : [])].join(' · ') || '—'}</TableCell></TableRow>)}</TableBody></Table></Card> : <Card appearance="outline" className="empty-inline"><ShoppingBagRegular /><strong>La selección no requiere ingredientes medidos</strong><span>Los ingredientes libres sin cantidad física no se pueden sumar a la compra.</span></Card>}
       </section>}
     </PageFrame>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateEquivalentSchema, createFoodSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema } from './index';
+import { calculateEquivalentSchema, createFoodSchema, foodPurchaseUnitsSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema } from './index';
 
 describe('shared request contracts', () => {
   it('keeps the Ades portion pending rather than treating it as free or verified', () => {
@@ -23,9 +23,11 @@ describe('shared request contracts', () => {
   });
   it('accepts exact food purchase-pack conversions and rejects duplicate package names', () => {
     const food = { id: '00000000-0000-4000-8000-000000000001', name: 'Pan de caja', group: 'Cereales y leguminosas', baseQuantity: '1', unit: 'rebanada', isFreeConsumption: false, portionPending: false, verifiedAt: '2026-10-05T12:00:00.000Z' };
-    const purchaseUnits = [{ unitName: 'paquetes', quantity: '11', unit: 'rebanadas' }];
+    const purchaseUnits = [{ unitName: 'paquetes', quantity: '12', unit: 'rebanadas', purchaseQuantity: '1', purchaseUnit: 'paquetes', isConfirmed: true, isApproximate: false, roundUp: true }];
     expect(foodSchema.safeParse({ ...food, purchaseUnits }).success).toBe(true);
     expect(foodSchema.safeParse({ ...food, purchaseUnits: [...purchaseUnits, ...purchaseUnits] }).success).toBe(false);
+    expect(foodPurchaseUnitsSchema.safeParse({ purchaseUnits: [{ unitName: 'empaque por confirmar', quantity: '1', unit: 'tazas', isConfirmed: false }] }).success).toBe(true);
+    expect(foodSchema.safeParse({ ...food, imageUrl: 'https://upload.wikimedia.org/example.jpg' }).success).toBe(true);
   });
 
   it('accepts exact fractional quantities for equivalent calculations', () => {

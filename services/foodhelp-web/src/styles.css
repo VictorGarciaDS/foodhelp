@@ -93,6 +93,11 @@ h1, h2, p { margin-top: 0; }
 .recipe-ai-action p { max-width: 68ch; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .recipe-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-radius: var(--radius); }
 .recipe-row > svg { color: var(--primary); }
+.recipe-thumbnail { width: 76px; height: 64px; flex: none; object-fit: cover; border-radius: 4px; }
+.recipe-image { display: grid; gap: 6px; margin: 0; }
+.recipe-image img { width: 100%; max-height: 320px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius); }
+.recipe-image figcaption { font-size: 12px; color: var(--muted); }
+.recipe-image a { color: var(--primary); }
 .recipe-row button { margin-left: auto; }
 .recipe-row { flex-direction: row; flex-wrap: wrap; }
 .recipe-summary { flex: 1; min-width: 180px; overflow-wrap: anywhere; }

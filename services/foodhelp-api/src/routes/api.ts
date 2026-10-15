@@ -7,7 +7,7 @@ import {
 } from '@foodhelp/contracts';
 import type { RecipeEdit } from '@foodhelp/contracts';
 import { getPool } from '../db/pool';
-import { calculateEquivalent, divideRoundUp, equivalentFraction, multiplyAmount, rationallyEqual, sumAmounts } from '../domain/equivalents/exact';
+import { calculateEquivalent, divideRoundUp, equivalentFraction, multiplyAmount, multiplyAmounts, rationallyEqual, sumAmounts } from '../domain/equivalents/exact';
 import { getGenerationBlockReason } from '../domain/menus/generation-readiness';
 import { streamPdf } from '../exports/pdf';
 import { ApiError, parseRequest } from '../errors';
@@ -122,7 +122,11 @@ export function createApiRouter(): Router {
     const result = await getPool().query(
       `SELECT f.id, f.name, f.food_group AS "group", f.base_quantity AS "baseQuantity", f.unit,
               f.is_free_consumption AS "isFreeConsumption", f.portion_pending AS "portionPending", f.verified_at AS "verifiedAt",
-              COALESCE((SELECT jsonb_agg(jsonb_build_object('unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit) ORDER BY pu.unit_name)
+              COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                          'unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit,
+                          'purchaseQuantity', pu.purchase_quantity, 'purchaseUnit', pu.purchase_unit,
+                          'isConfirmed', pu.is_confirmed, 'isApproximate', pu.is_approximate, 'roundUp', pu.round_up
+                        ) ORDER BY pu.unit_name)
                         FROM foodhelp.food_purchase_units pu WHERE pu.food_id = f.id), '[]'::jsonb) AS "purchaseUnits"
        FROM foodhelp.foods f ORDER BY f.food_group, f.name`,
     );
@@ -158,9 +162,10 @@ export function createApiRouter(): Router {
       await client.query('DELETE FROM foodhelp.food_purchase_units WHERE food_id = $1', [foodId]);
       for (const purchaseUnit of input.purchaseUnits) {
         await client.query(
-          `INSERT INTO foodhelp.food_purchase_units (food_id, unit_name, quantity, ingredient_unit)
-           VALUES ($1, $2, $3, $4)`,
-          [foodId, purchaseUnit.unitName, purchaseUnit.quantity, canonicalUnit(purchaseUnit.unit)],
+          `INSERT INTO foodhelp.food_purchase_units
+             (food_id, unit_name, quantity, ingredient_unit, purchase_quantity, purchase_unit, is_confirmed, is_approximate, round_up)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [foodId, purchaseUnit.unitName, purchaseUnit.quantity, canonicalUnit(purchaseUnit.unit), purchaseUnit.purchaseQuantity, purchaseUnit.purchaseUnit, purchaseUnit.isConfirmed, purchaseUnit.isApproximate, purchaseUnit.roundUp],
         );
       }
       await client.query('COMMIT');
@@ -282,7 +287,8 @@ export function createApiRouter(): Router {
   router.get('/recipes', async (_request, response) => {
     const result = await getPool().query(
       `SELECT r.id, r.name, r.verified_at AS "verifiedAt", r.person_id AS "personId", p.name AS "personName",
-          r.meal_time AS "mealTime", r.review_notes AS "reviewNotes"
+          r.meal_time AS "mealTime", r.review_notes AS "reviewNotes", r.image_url AS "imageUrl",
+          r.image_attribution AS "imageAttribution", r.image_license AS "imageLicense"
        FROM foodhelp.recipes r LEFT JOIN foodhelp.people p ON p.id = r.person_id ORDER BY r.created_at DESC, r.meal_time, r.name`,
     );
     response.json({ items: result.rows });
@@ -296,8 +302,9 @@ export function createApiRouter(): Router {
     const selectedFoods = await pool.query('SELECT id FROM foodhelp.foods WHERE id = ANY($1::uuid[]) AND verified_at IS NOT NULL AND NOT portion_pending', [input.mainFoodIds]);
     if (selectedFoods.rowCount !== input.mainFoodIds.length) throw new ApiError(422, 'VALIDATION_ERROR', 'Los ingredientes principales deben existir y estar verificados.');
     const result = await pool.query(
-      `SELECT r.id, r.name, r.verified_at AS "verifiedAt", r.person_id AS "personId", p.name AS "personName",
-              r.meal_time AS "mealTime", r.review_notes AS "reviewNotes", r.ingredients
+            `SELECT r.id, r.name, r.verified_at AS "verifiedAt", r.person_id AS "personId", p.name AS "personName",
+              r.meal_time AS "mealTime", r.review_notes AS "reviewNotes", r.ingredients, r.image_url AS "imageUrl",
+              r.image_attribution AS "imageAttribution", r.image_license AS "imageLicense"
        FROM foodhelp.recipes r JOIN foodhelp.people p ON p.id = r.person_id
        WHERE r.person_id = $1 AND r.meal_time = $2 ORDER BY r.verified_at DESC NULLS LAST, r.created_at DESC`,
       [input.personId, input.mealTime],
@@ -379,7 +386,8 @@ export function createApiRouter(): Router {
          VALUES ($1, $2, $3, $4, ARRAY[]::text[], $5::jsonb, $6::jsonb, now())
          RETURNING id, name, verified_at AS "verifiedAt", person_id AS "personId", meal_time AS "mealTime",
            (SELECT p.name FROM foodhelp.people p WHERE p.id = $1) AS "personName", source_text AS "sourceText",
-           review_notes AS "reviewNotes", instructions, ingredients`,
+           review_notes AS "reviewNotes", instructions, ingredients, image_url AS "imageUrl",
+           image_attribution AS "imageAttribution", image_license AS "imageLicense"`,
         [edit.personId, edit.name, edit.mealTime, edit.sourceText, JSON.stringify(edit.instructions), JSON.stringify(edit.ingredients)],
       );
       saved.push(result.rows[0]);
@@ -393,7 +401,8 @@ export function createApiRouter(): Router {
     const result = await getPool().query(
       `SELECT r.id, r.name, r.instructions, r.ingredients, r.verified_at AS "verifiedAt",
           r.person_id AS "personId", p.name AS "personName", r.meal_time AS "mealTime",
-          r.source_text AS "sourceText", r.review_notes AS "reviewNotes"
+          r.source_text AS "sourceText", r.review_notes AS "reviewNotes", r.image_url AS "imageUrl",
+          r.image_attribution AS "imageAttribution", r.image_license AS "imageLicense"
        FROM foodhelp.recipes r LEFT JOIN foodhelp.people p ON p.id = r.person_id WHERE r.id = $1`,
       [id],
     );
@@ -411,12 +420,13 @@ export function createApiRouter(): Router {
     await validateRecipeForProfile(input);
     const result = await getPool().query(
       `INSERT INTO foodhelp.recipes
-         (person_id, name, meal_time, source_text, review_notes, instructions, ingredients, verified_at)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, CASE WHEN $8 THEN now() ELSE NULL END)
+         (person_id, name, meal_time, source_text, review_notes, instructions, ingredients, verified_at, image_url, image_attribution, image_license)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, CASE WHEN $8 THEN now() ELSE NULL END, $9, $10, $11)
        RETURNING id, name, verified_at AS "verifiedAt", person_id AS "personId", meal_time AS "mealTime",
          (SELECT p.name FROM foodhelp.people p WHERE p.id = $1) AS "personName",
-         source_text AS "sourceText", review_notes AS "reviewNotes", instructions, ingredients`,
-      [input.personId, input.name, input.mealTime, input.sourceText, input.reviewNotes, JSON.stringify(input.instructions), JSON.stringify(input.ingredients), input.verify],
+         source_text AS "sourceText", review_notes AS "reviewNotes", instructions, ingredients,
+         image_url AS "imageUrl", image_attribution AS "imageAttribution", image_license AS "imageLicense"`,
+      [input.personId, input.name, input.mealTime, input.sourceText, input.reviewNotes, JSON.stringify(input.instructions), JSON.stringify(input.ingredients), input.verify, input.imageUrl ?? null, input.imageAttribution ?? null, input.imageLicense ?? null],
     );
     response.status(201).json({ recipe: result.rows[0] });
   });
@@ -432,12 +442,13 @@ export function createApiRouter(): Router {
     const result = await pool.query(
       `UPDATE foodhelp.recipes SET person_id = $9, name = $2, meal_time = $3, source_text = $4,
          review_notes = $5, ingredients = $6::jsonb, instructions = $7::jsonb,
-         verified_at = CASE WHEN $8 THEN now() ELSE NULL END
+         verified_at = CASE WHEN $8 THEN now() ELSE NULL END, image_url = $10, image_attribution = $11, image_license = $12
        WHERE id = $1
        RETURNING id, name, verified_at AS "verifiedAt", person_id AS "personId", meal_time AS "mealTime",
         (SELECT p.name FROM foodhelp.people p WHERE p.id = $9) AS "personName",
-        source_text AS "sourceText", review_notes AS "reviewNotes", instructions, ingredients`,
-      [id, input.name, input.mealTime, input.sourceText, input.reviewNotes, JSON.stringify(input.ingredients), JSON.stringify(input.instructions), input.verify, input.personId],
+        source_text AS "sourceText", review_notes AS "reviewNotes", instructions, ingredients,
+        image_url AS "imageUrl", image_attribution AS "imageAttribution", image_license AS "imageLicense"`,
+      [id, input.name, input.mealTime, input.sourceText, input.reviewNotes, JSON.stringify(input.ingredients), JSON.stringify(input.instructions), input.verify, input.personId, input.imageUrl ?? null, input.imageAttribution ?? null, input.imageLicense ?? null],
     );
     response.json({ recipe: result.rows[0] });
   });
@@ -562,7 +573,11 @@ export function createApiRouter(): Router {
     const foodIds = [...new Set([...ingredientTotals.values()].map((item) => item.foodId))];
     const foodResult = foodIds.length ? await getPool().query(
       `SELECT f.id, f.name,
-              COALESCE(jsonb_agg(jsonb_build_object('unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit))
+              COALESCE(jsonb_agg(jsonb_build_object(
+                'unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit,
+                'purchaseQuantity', pu.purchase_quantity, 'purchaseUnit', pu.purchase_unit,
+                'isConfirmed', pu.is_confirmed, 'isApproximate', pu.is_approximate, 'roundUp', pu.round_up
+              ))
                 FILTER (WHERE pu.id IS NOT NULL), '[]'::jsonb) AS "purchaseUnits"
        FROM foodhelp.foods f LEFT JOIN foodhelp.food_purchase_units pu ON pu.food_id = f.id
        WHERE f.id = ANY($1::uuid[]) GROUP BY f.id`, [foodIds],
@@ -573,9 +588,27 @@ export function createApiRouter(): Router {
       name: (foods.get(item.foodId)?.name as string | undefined) ?? 'Alimento desconocido',
       unit: item.unit,
       quantity: sumAmounts(item.quantities),
-      purchaseOptions: ((foods.get(item.foodId)?.purchaseUnits ?? []) as { unitName: string; quantity: string; unit: string }[])
-        .filter((purchaseUnit) => canonicalUnit(purchaseUnit.unit) === item.unit)
-        .map((purchaseUnit) => ({ unitName: purchaseUnit.unitName, quantity: divideRoundUp(sumAmounts(item.quantities), purchaseUnit.quantity), contents: purchaseUnit.quantity, unit: item.unit })),
+      purchaseOptions: ((foods.get(item.foodId)?.purchaseUnits ?? []) as { unitName: string; quantity: string; unit: string; purchaseQuantity: string; purchaseUnit: string; isConfirmed: boolean; isApproximate: boolean; roundUp: boolean }[])
+        .filter((purchaseUnit) => purchaseUnit.isConfirmed && canonicalUnit(purchaseUnit.unit) === item.unit && canonicalUnit(purchaseUnit.purchaseUnit) !== item.unit)
+        .map((purchaseUnit) => {
+          const ingredientTotal = sumAmounts(item.quantities);
+          const quantity = purchaseUnit.roundUp
+            ? multiplyAmount(purchaseUnit.purchaseQuantity, Number(divideRoundUp(ingredientTotal, purchaseUnit.quantity)))
+            : (() => {
+              const ratio = equivalentFraction(ingredientTotal, purchaseUnit.quantity);
+              const ratioAmount = ratio.denominator === '1' ? ratio.numerator : `${ratio.numerator}/${ratio.denominator}`;
+              return multiplyAmounts(ratioAmount, purchaseUnit.purchaseQuantity);
+            })();
+          return {
+            unitName: purchaseUnit.unitName,
+            quantity,
+            contents: purchaseUnit.quantity,
+            unit: item.unit,
+            purchaseUnit: purchaseUnit.purchaseUnit,
+            isApproximate: purchaseUnit.isApproximate,
+          };
+        }),
+      purchasePending: !((foods.get(item.foodId)?.purchaseUnits ?? []) as { isConfirmed: boolean }[]).some((purchaseUnit) => purchaseUnit.isConfirmed),
     })).sort((left, right) => left.name.localeCompare(right.name, 'es') || left.unit.localeCompare(right.unit, 'es'));
     response.json({ days: input.days, participantCount: input.peopleCount, peopleCount: input.peopleCount, participants: [{ personId: participant.personId, days: input.days }], usage, items });
   });

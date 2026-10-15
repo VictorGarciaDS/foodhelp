@@ -34,7 +34,7 @@ describe('cliente API same-origin', () => {
   });
 
   it('saves purchase-unit relations through the same-origin API', async () => {
-    const purchaseUnits = [{ unitName: 'paquetes', quantity: '11', unit: 'rebanadas' }];
+    const purchaseUnits = [{ unitName: 'paquetes', quantity: '12', unit: 'rebanadas', purchaseQuantity: '1', purchaseUnit: 'paquetes', isConfirmed: true, isApproximate: false, roundUp: true }];
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ purchaseUnits }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await expect(api.setFoodPurchaseUnits('food-id', purchaseUnits)).resolves.toEqual(purchaseUnits);

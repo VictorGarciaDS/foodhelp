@@ -32,6 +32,8 @@ function validateFoodPortion(value: z.infer<typeof foodPortionSchema>, context: 
 }
 export const purchaseUnitSchema = z.object({
   unitName: z.string().trim().min(1).max(80), quantity: positiveAmount, unit: z.string().trim().min(1).max(80),
+  purchaseQuantity: positiveAmount.default('1'), purchaseUnit: z.string().trim().min(1).max(80).default('paquetes'),
+  isConfirmed: z.boolean().default(true), isApproximate: z.boolean().default(false), roundUp: z.boolean().default(true),
 });
 export const foodPurchaseUnitsSchema = z.object({ purchaseUnits: z.array(purchaseUnitSchema).max(10) }).superRefine((value, context) => {
   const unitNames = value.purchaseUnits.map((unit) => unit.unitName.toLocaleLowerCase('es'));
@@ -104,6 +106,9 @@ export const recipeEditSchema = z.object({
   personId: z.string().uuid(),
   name: z.string().trim().min(1).max(160),
   mealTime: z.enum(mealTimes),
+  imageUrl: z.string().url().max(2000).nullable().optional(),
+  imageAttribution: z.string().trim().max(500).nullable().optional(),
+  imageLicense: z.string().trim().max(200).nullable().optional(),
   sourceText: z.string().trim().min(1).max(6000),
   reviewNotes: z.array(z.string().trim().min(1).max(500)).max(30),
   instructions: z.array(z.string().trim().min(1).max(1000)).max(30),

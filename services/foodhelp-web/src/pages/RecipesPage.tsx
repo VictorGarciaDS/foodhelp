@@ -62,6 +62,9 @@ export function RecipesPage() {
       reviewNotes: recipe.reviewNotes ?? [],
       instructions: recipe.instructions ?? [],
       ingredients: recipe.ingredients ?? [],
+      imageUrl: recipe.imageUrl,
+      imageAttribution: recipe.imageAttribution,
+      imageLicense: recipe.imageLicense,
       verify: Boolean(recipe.verifiedAt),
     });
   }
@@ -72,7 +75,7 @@ export function RecipesPage() {
     setEditorError(null);
     setSelectedId(null);
     setCreating(true);
-    setEditor({ personId, name: '', mealTime: 'Desayuno', sourceText: '', reviewNotes: [], instructions: [], ingredients: [], verify: false });
+    setEditor({ personId, name: '', mealTime: 'Desayuno', sourceText: '', reviewNotes: [], instructions: [], ingredients: [], imageUrl: null, imageAttribution: null, imageLicense: null, verify: false });
   }
 
   function updateIngredient(index: number, changes: Partial<RecipeIngredient>) {
@@ -175,6 +178,7 @@ export function RecipesPage() {
         <div className="recipe-list-heading"><SectionHeading detail={`${recipes.length} propuestas`}>Recetas guardadas</SectionHeading><Button appearance="primary" icon={<AddRegular />} disabled={!people?.length} onClick={startCreating}>Añadir receta</Button></div>
         <div className="recipe-list">{recipes.map((recipe) => (
           <Card appearance="outline" key={recipe.id} className="recipe-row">
+            {recipe.imageUrl && <img className="recipe-thumbnail" src={recipe.imageUrl} alt={recipe.name} loading="lazy" />}
             <BookmarkRegular aria-hidden="true" />
             <div className="recipe-summary"><strong>{recipe.name}</strong><p>{recipe.personName ?? 'Sin persona asignada'} · {recipe.mealTime ?? 'Sin tiempo asignado'}</p><span className={`status-pill ${recipe.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{recipe.verifiedAt ? 'Verificada' : 'Borrador pendiente de revisión'}</span></div>
             <Button appearance="secondary" icon={<EyeRegular />} onClick={() => setSelectedId(recipe.id)}>Ver detalle</Button>
@@ -216,6 +220,9 @@ export function RecipesPage() {
                 <Field label="Persona" required><Select value={editor.personId} onChange={(event) => setEditor({ ...editor, personId: event.currentTarget.value, verify: false })}>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
                 <Field label="Tiempo de comida" required><Select value={editor.mealTime} onChange={(event) => setEditor({ ...editor, mealTime: event.currentTarget.value as RecipeEdit['mealTime'], verify: false })}>{mealTimes.map((mealTime) => <option key={mealTime}>{mealTime}</option>)}</Select></Field>
                 <Field label="Propuesta original" required><Textarea required resize="vertical" value={editor.sourceText} onChange={(_event, value) => setEditor({ ...editor, sourceText: value.value, verify: false })} /></Field>
+                <Field label="URL de imagen"><Input type="url" value={editor.imageUrl ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageUrl: value.value || null, verify: false })} placeholder="https://upload.wikimedia.org/..." /></Field>
+                <Field label="Fuente / autor de imagen"><Input type="url" value={editor.imageAttribution ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageAttribution: value.value || null, verify: false })} placeholder="https://commons.wikimedia.org/wiki/File:..." /></Field>
+                <Field label="Licencia / crédito"><Input value={editor.imageLicense ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageLicense: value.value || null, verify: false })} placeholder="Autor · CC BY 4.0" /></Field>
                 <Field label="Pendientes de revisión"><Textarea resize="vertical" placeholder="Una nota pendiente por línea; deja vacío para confirmar que se resolvieron." value={editor.reviewNotes.join('\n')} onChange={(_event, value) => setEditor({ ...editor, reviewNotes: value.value.split('\n').map((note) => note.trim()).filter(Boolean), verify: false })} /></Field>
                 <section className="recipe-ingredients-editor">
                   <h3>Ingredientes por persona</h3>
@@ -244,6 +251,7 @@ export function RecipesPage() {
             ) : detailBusy ? <p role="status">Cargando receta...</p> : detailError ? <p role="alert" className="form-error">{detailError}</p> : detail && (
               <>
                 <p>{detail.personName} · {detail.mealTime}</p>
+                {detail.imageUrl && <figure className="recipe-image"><img src={detail.imageUrl} alt={detail.name} /><figcaption>{detail.imageAttribution ? <a href={detail.imageAttribution} target="_blank" rel="noreferrer">Fuente de la imagen</a> : 'Imagen de receta'}{detail.imageLicense ? ` · ${detail.imageLicense}` : ''}</figcaption></figure>}
                 {!detail.verifiedAt && <MessageBar intent="warning"><MessageBarBody>Borrador no disponible en listas hasta completar ingredientes y verificar equivalencias.</MessageBarBody></MessageBar>}
                 {detail.sourceText && <section><h3>Propuesta original</h3><p className="recipe-source">{detail.sourceText}</p></section>}
                 <section><h3>Ingredientes por persona</h3>{detail.ingredients.length ? <ul>{detail.ingredients.map((ingredient, index) => <li key={index}>{ingredient.isFreeConsumption ? `Libre${ingredient.quantity && ingredient.unit ? ` · ${ingredient.quantity} ${ingredient.unit} para compras` : ''}` : `${ingredient.quantity} ${ingredient.unit}`} · {foods?.find((food) => food.id === ingredient.foodId)?.name ?? ingredient.foodId}</li>)}</ul> : <p>Ingredientes aún no estructurados.</p>}</section>
