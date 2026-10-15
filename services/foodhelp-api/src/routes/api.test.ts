@@ -251,6 +251,25 @@ describe('catalog and prescription routes', () => {
     });
   });
 
+  it('counts unmeasured free vegetables as recipe portions in the shopping list', async () => {
+    const personId = '00000000-0000-4000-8000-000000000001';
+    const vegetableId = '00000000-0000-4000-8000-000000000004';
+    const recipeIds = Array.from({ length: 4 }, (_value, index) => `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`);
+    database.query.mockResolvedValueOnce({ rows: [{ id: personId }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime, index) => ({
+      id: recipeIds[index], personId, mealTime, ingredients: [
+        { foodId: vegetableId, quantity: null, unit: null, isFreeConsumption: true, group: 'Verduras' },
+      ],
+    })), rowCount: 4 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: vegetableId, name: 'Espinaca' }], rowCount: 1 });
+    const meals = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime, index) => ({ mealTime, recipeIds: [recipeIds[index]] }));
+    const response = await request('/shopping-list/calculate', 'POST', { days: 3, participants: [{ personId, days: 3, meals }] });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      items: [{ foodId: vegetableId, name: 'Espinaca', quantity: '12', unit: 'porciones' }],
+    });
+  });
+
   it('returns the reduced rational result for the saved food unit', async () => {
     const response = await calculate('pieza');
     expect(response.status).toBe(200);

@@ -487,8 +487,16 @@ export function createApiRouter(): Router {
             throw new ApiError(422, 'VALIDATION_ERROR', 'La receta debe estar verificada para esa persona y ese tiempo de comida.');
           }
           usage.push({ personId: participant.personId, mealTime: meal.mealTime, recipeId, day: day + 1 });
-          for (const ingredient of recipe.ingredients as { foodId: string; quantity: string | null; unit: string | null; isFreeConsumption: boolean }[]) {
-            if (ingredient.quantity === null && ingredient.unit === null) continue;
+          for (const ingredient of recipe.ingredients as { foodId: string; quantity: string | null; unit: string | null; isFreeConsumption: boolean; group: string }[]) {
+            if (ingredient.quantity === null && ingredient.unit === null) {
+              if (ingredient.isFreeConsumption && ingredient.group === 'Verduras') {
+                const key = `${ingredient.foodId}\u0000porciones`;
+                const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: 'porciones' };
+                item.quantities.push('1');
+                ingredientTotals.set(key, item);
+              }
+              continue;
+            }
             if (!ingredient.quantity || !ingredient.unit) throw new ApiError(409, 'MENU_BLOCKED', 'Un ingrediente de receta contiene solo cantidad o unidad.');
             const key = `${ingredient.foodId}\u0000${ingredient.unit}`;
             const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: ingredient.unit };
