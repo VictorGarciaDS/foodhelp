@@ -1,19 +1,39 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  calculateEquivalentSchema, createFoodSchema, createPersonSchema, generateMenuRequestSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema,
+  calculateEquivalentSchema, createFoodSchema, createPersonSchema, foodPurchaseUnitsSchema, generateMenuRequestSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema,
   idPathSchema, pdfRequestSchema, personPathSchema, prescriptionPathSchema, prescriptionSchema, shoppingListQuerySchema,
   suggestionsRequestSchema, weekPathSchema,
 } from '@foodhelp/contracts';
 import type { RecipeEdit } from '@foodhelp/contracts';
 import { getPool } from '../db/pool';
-import { calculateEquivalent, equivalentFraction, multiplyAmount, rationallyEqual, sumAmounts } from '../domain/equivalents/exact';
+import { calculateEquivalent, divideRoundUp, equivalentFraction, multiplyAmount, rationallyEqual, sumAmounts } from '../domain/equivalents/exact';
 import { getGenerationBlockReason } from '../domain/menus/generation-readiness';
 import { streamPdf } from '../exports/pdf';
 import { ApiError, parseRequest } from '../errors';
 import { requestRecipeProposals } from '../integrations/completion-api';
 
 const foodIdPathSchema = z.object({ foodId: z.string().uuid() });
+
+function canonicalUnit(unit: string): string {
+  const normalized = unit.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es');
+  const units: Record<string, string> = {
+    pieza: 'piezas', piezas: 'piezas',
+    rebanada: 'rebanadas', rebanadas: 'rebanadas',
+    taza: 'tazas', tazas: 'tazas',
+    cucharada: 'cucharadas', cucharadas: 'cucharadas',
+    cucharadita: 'cucharaditas', cucharaditas: 'cucharaditas',
+    paquete: 'paquetes', paquetes: 'paquetes',
+    barra: 'barras', barras: 'barras',
+    bolsa: 'bolsas', bolsas: 'bolsas',
+    tazon: 'tazones', tazones: 'tazones',
+    porcion: 'porciones', porciones: 'porciones',
+    diente: 'dientes', dientes: 'dientes',
+    gramo: 'g', gramos: 'g', g: 'g',
+    mililitro: 'ml', mililitros: 'ml', ml: 'ml',
+  };
+  return units[normalized] ?? unit.trim();
+}
 
 async function validateRecipeForProfile(input: RecipeEdit): Promise<void> {
   const pool = getPool();
@@ -100,9 +120,11 @@ export function createApiRouter(): Router {
 
   router.get('/foods', async (_request, response) => {
     const result = await getPool().query(
-                  `SELECT id, name, food_group AS "group", base_quantity AS "baseQuantity", unit,
-                    is_free_consumption AS "isFreeConsumption", portion_pending AS "portionPending", verified_at AS "verifiedAt"
-       FROM foodhelp.foods ORDER BY food_group, name`,
+      `SELECT f.id, f.name, f.food_group AS "group", f.base_quantity AS "baseQuantity", f.unit,
+              f.is_free_consumption AS "isFreeConsumption", f.portion_pending AS "portionPending", f.verified_at AS "verifiedAt",
+              COALESCE((SELECT jsonb_agg(jsonb_build_object('unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit) ORDER BY pu.unit_name)
+                        FROM foodhelp.food_purchase_units pu WHERE pu.food_id = f.id), '[]'::jsonb) AS "purchaseUnits"
+       FROM foodhelp.foods f ORDER BY f.food_group, f.name`,
     );
     response.json({ items: result.rows });
   });
@@ -113,10 +135,42 @@ export function createApiRouter(): Router {
       `INSERT INTO foodhelp.foods (name, food_group, base_quantity, unit, is_free_consumption, verified_at, portion_pending)
        VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN now() ELSE NULL END, $7)
        RETURNING id, name, food_group AS "group", base_quantity AS "baseQuantity", unit,
-         is_free_consumption AS "isFreeConsumption", portion_pending AS "portionPending", verified_at AS "verifiedAt"`,
+         is_free_consumption AS "isFreeConsumption", portion_pending AS "portionPending", verified_at AS "verifiedAt", '[]'::jsonb AS "purchaseUnits"`,
       [input.name, input.group, input.baseQuantity, input.unit, input.isFreeConsumption, input.verified, input.portionPending ?? false],
     );
     response.status(201).json({ item: result.rows[0] });
+  });
+
+  router.put('/foods/:foodId/purchase-units', async (request, response) => {
+    const { foodId } = parseRequest(foodIdPathSchema, request.params);
+    const input = parseRequest(foodPurchaseUnitsSchema, request.body);
+    const pool = getPool();
+    const food = await pool.query<{ isFreeConsumption: boolean; unit: string | null }>(
+      'SELECT is_free_consumption AS "isFreeConsumption", unit FROM foodhelp.foods WHERE id = $1', [foodId],
+    );
+    if (!food.rowCount) throw new ApiError(404, 'NOT_FOUND', 'Alimento no encontrado.');
+    if (!food.rows[0].isFreeConsumption && input.purchaseUnits.some((purchaseUnit) => canonicalUnit(purchaseUnit.unit) !== canonicalUnit(food.rows[0].unit ?? ''))) {
+      throw new ApiError(422, 'VALIDATION_ERROR', 'La unidad del empaque debe coincidir con la unidad porcionada del alimento.');
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM foodhelp.food_purchase_units WHERE food_id = $1', [foodId]);
+      for (const purchaseUnit of input.purchaseUnits) {
+        await client.query(
+          `INSERT INTO foodhelp.food_purchase_units (food_id, unit_name, quantity, ingredient_unit)
+           VALUES ($1, $2, $3, $4)`,
+          [foodId, purchaseUnit.unitName, purchaseUnit.quantity, canonicalUnit(purchaseUnit.unit)],
+        );
+      }
+      await client.query('COMMIT');
+      response.json({ purchaseUnits: input.purchaseUnits.map((unit) => ({ ...unit, unit: canonicalUnit(unit.unit) })) });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   });
 
   router.get('/people', async (_request, response) => {
@@ -462,61 +516,68 @@ export function createApiRouter(): Router {
 
   router.post('/shopping-list/calculate', async (request, response) => {
     const input = parseRequest(shoppingPlanSchema, request.body);
-    const personIds = [...new Set(input.participants.map((participant) => participant.personId))];
-    const existingPeople = await getPool().query('SELECT id FROM foodhelp.people WHERE id = ANY($1::uuid[])', [personIds]);
-    if (existingPeople.rowCount !== personIds.length) throw new ApiError(404, 'NOT_FOUND', 'Una persona seleccionada ya no existe.');
+    const participant = input.participants[0];
+    const person = await getPool().query('SELECT id FROM foodhelp.people WHERE id = $1', [participant.personId]);
+    if (!person.rowCount) throw new ApiError(404, 'NOT_FOUND', 'La persona seleccionada ya no existe.');
 
-    const recipeIds = [...new Set(input.participants.flatMap((participant) => participant.meals.flatMap((meal) => meal.recipeIds)))];
+    const recipeIds = [...new Set(participant.meals.flatMap((meal) => meal.recipeIds))];
     const recipeResult = await getPool().query(
       `SELECT id, person_id AS "personId", meal_time AS "mealTime", ingredients
        FROM foodhelp.recipes WHERE id = ANY($1::uuid[]) AND verified_at IS NOT NULL`, [recipeIds],
     );
     const recipes = new Map(recipeResult.rows.map((recipe) => [recipe.id as string, recipe]));
     const ingredientTotals = new Map<string, { foodId: string; quantities: string[]; unit: string }>();
-    const usage: { personId: string; mealTime: string; recipeId: string; day: number }[] = [];
+    const usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[] = [];
 
-    const participantDurations = input.participants.map((participant) => ({ personId: participant.personId, days: participant.days ?? input.days }));
-    for (const participant of input.participants) {
-      const participantDays = participant.days ?? input.days;
+    for (let day = 0; day < input.days; day += 1) {
       for (const meal of participant.meals) {
-        for (let day = 0; day < participantDays; day += 1) {
-          const recipeId = meal.recipeIds[day % meal.recipeIds.length];
-          const recipe = recipes.get(recipeId);
-          if (!recipe) throw new ApiError(409, 'MENU_BLOCKED', 'Todas las recetas deben tener ingredientes completos y verificados antes de generar compras.');
-          if (recipe.personId !== participant.personId || recipe.mealTime !== meal.mealTime) {
-            throw new ApiError(422, 'VALIDATION_ERROR', 'La receta debe estar verificada para esa persona y ese tiempo de comida.');
-          }
-          usage.push({ personId: participant.personId, mealTime: meal.mealTime, recipeId, day: day + 1 });
-          for (const ingredient of recipe.ingredients as { foodId: string; quantity: string | null; unit: string | null; isFreeConsumption: boolean; group: string }[]) {
-            if (ingredient.quantity === null && ingredient.unit === null) {
-              if (ingredient.isFreeConsumption && ingredient.group === 'Verduras') {
-                const key = `${ingredient.foodId}\u0000porciones`;
-                const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: 'porciones' };
-                item.quantities.push('1');
-                ingredientTotals.set(key, item);
-              }
-              continue;
+        const recipeId = meal.recipeIds[day];
+        if (day > 0 && recipeId === meal.recipeIds[day - 1]) throw new ApiError(422, 'VALIDATION_ERROR', 'Elige una receta distinta a la del día anterior para variar el menú.');
+        const recipe = recipes.get(recipeId);
+        if (!recipe) throw new ApiError(409, 'MENU_BLOCKED', 'Todas las recetas deben tener ingredientes completos y verificados antes de calcular compras.');
+        if (recipe.personId !== participant.personId || recipe.mealTime !== meal.mealTime) {
+          throw new ApiError(422, 'VALIDATION_ERROR', 'La receta debe estar verificada para esa persona y ese tiempo de comida.');
+        }
+        usage.push({ personId: participant.personId, mealTime: meal.mealTime, recipeId, day: day + 1, peopleCount: input.peopleCount });
+        for (const ingredient of recipe.ingredients as { foodId: string; quantity: string | null; unit: string | null; isFreeConsumption: boolean; group: string }[]) {
+          if (ingredient.quantity === null && ingredient.unit === null) {
+            if (ingredient.isFreeConsumption && ingredient.group === 'Verduras') {
+              const key = `${ingredient.foodId}\u0000porciones`;
+              const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: 'porciones' };
+              item.quantities.push(String(input.peopleCount));
+              ingredientTotals.set(key, item);
             }
-            if (!ingredient.quantity || !ingredient.unit) throw new ApiError(409, 'MENU_BLOCKED', 'Un ingrediente de receta contiene solo cantidad o unidad.');
-            const key = `${ingredient.foodId}\u0000${ingredient.unit}`;
-            const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: ingredient.unit };
-            item.quantities.push(ingredient.quantity);
-            ingredientTotals.set(key, item);
+            continue;
           }
+          if (!ingredient.quantity || !ingredient.unit) throw new ApiError(409, 'MENU_BLOCKED', 'Un ingrediente de receta contiene solo cantidad o unidad.');
+          const unit = canonicalUnit(ingredient.unit);
+          const key = `${ingredient.foodId}\u0000${unit}`;
+          const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit };
+          item.quantities.push(multiplyAmount(ingredient.quantity, input.peopleCount));
+          ingredientTotals.set(key, item);
         }
       }
     }
 
     const foodIds = [...new Set([...ingredientTotals.values()].map((item) => item.foodId))];
-    const foodResult = foodIds.length ? await getPool().query('SELECT id, name FROM foodhelp.foods WHERE id = ANY($1::uuid[])', [foodIds]) : { rows: [] };
-    const names = new Map(foodResult.rows.map((food) => [food.id as string, food.name as string]));
+    const foodResult = foodIds.length ? await getPool().query(
+      `SELECT f.id, f.name,
+              COALESCE(jsonb_agg(jsonb_build_object('unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit))
+                FILTER (WHERE pu.id IS NOT NULL), '[]'::jsonb) AS "purchaseUnits"
+       FROM foodhelp.foods f LEFT JOIN foodhelp.food_purchase_units pu ON pu.food_id = f.id
+       WHERE f.id = ANY($1::uuid[]) GROUP BY f.id`, [foodIds],
+    ) : { rows: [] };
+    const foods = new Map(foodResult.rows.map((food) => [food.id as string, food]));
     const items = [...ingredientTotals.entries()].map(([key, item]) => ({
       foodId: item.foodId,
-      name: names.get(item.foodId) ?? 'Alimento desconocido',
+      name: (foods.get(item.foodId)?.name as string | undefined) ?? 'Alimento desconocido',
       unit: item.unit,
       quantity: sumAmounts(item.quantities),
+      purchaseOptions: ((foods.get(item.foodId)?.purchaseUnits ?? []) as { unitName: string; quantity: string; unit: string }[])
+        .filter((purchaseUnit) => canonicalUnit(purchaseUnit.unit) === item.unit)
+        .map((purchaseUnit) => ({ unitName: purchaseUnit.unitName, quantity: divideRoundUp(sumAmounts(item.quantities), purchaseUnit.quantity), contents: purchaseUnit.quantity, unit: item.unit })),
     })).sort((left, right) => left.name.localeCompare(right.name, 'es') || left.unit.localeCompare(right.unit, 'es'));
-    response.json({ days: input.days, participantCount: input.participants.length, participants: participantDurations, usage, items });
+    response.json({ days: input.days, participantCount: input.peopleCount, peopleCount: input.peopleCount, participants: [{ personId: participant.personId, days: input.days }], usage, items });
   });
 
   router.post('/exports/pdf', async (request, response) => {

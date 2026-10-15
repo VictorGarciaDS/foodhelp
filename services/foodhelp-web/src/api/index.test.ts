@@ -16,13 +16,13 @@ describe('cliente API same-origin', () => {
 
   it('saves recipe edits and requests a deterministic shopping calculation', async () => {
     const recipe = { id: 'recipe-id', name: 'Receta', verifiedAt: null, personId: 'person-id', personName: 'Patricia', mealTime: 'Comida' as const, sourceText: 'Texto', reviewNotes: [], instructions: [], ingredients: [] };
-    const result = { days: 3, participantCount: 1, usage: [], items: [{ foodId: 'food-id', name: 'Tortilla', unit: 'pieza', quantity: '18' }] };
+    const result = { days: 3, participantCount: 2, peopleCount: 2, participants: [{ personId: 'person-id', days: 3 }], usage: [], items: [{ foodId: 'food-id', name: 'Tortilla', unit: 'piezas', quantity: '18', purchaseOptions: [] }] };
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ recipe }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(result), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await expect(api.updateRecipe('recipe-id', { ...recipe, verify: false })).resolves.toMatchObject({ id: 'recipe-id' });
-    await expect(api.calculateShopping({ days: 3, participants: [{ personId: 'person-id', meals: ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime: mealTime as 'Desayuno' | 'Almuerzo' | 'Comida' | 'Cena', recipeIds: ['recipe-id'] })) }] })).resolves.toEqual(result);
+    await expect(api.calculateShopping({ days: 3, peopleCount: 2, participants: [{ personId: 'person-id', meals: ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime: mealTime as 'Desayuno' | 'Almuerzo' | 'Comida' | 'Cena', recipeIds: ['recipe-id', 'recipe-id-2', 'recipe-id-3'] })) }] })).resolves.toEqual(result);
     expect(fetchMock).toHaveBeenLastCalledWith('/api/shopping-list/calculate', expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ 'x-foodhelp-request': '1' }) }));
   });
   it('carga alimentos del backend sin cambiar de origen', async () => {
@@ -31,6 +31,14 @@ describe('cliente API same-origin', () => {
 
     await expect(api.listFoods()).resolves.toEqual([]);
     expect(fetchMock).toHaveBeenCalledWith('/api/foods', expect.objectContaining({ credentials: 'same-origin' }));
+  });
+
+  it('saves purchase-unit relations through the same-origin API', async () => {
+    const purchaseUnits = [{ unitName: 'paquetes', quantity: '11', unit: 'rebanadas' }];
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ purchaseUnits }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.setFoodPurchaseUnits('food-id', purchaseUnits)).resolves.toEqual(purchaseUnits);
+    expect(fetchMock).toHaveBeenCalledWith('/api/foods/food-id/purchase-units', expect.objectContaining({ method: 'PUT', headers: expect.objectContaining({ 'x-foodhelp-request': '1' }) }));
   });
 
   it('envía mutaciones al mismo origen con el encabezado CSRF acordado', async () => {

@@ -85,3 +85,11 @@ export function multiplyAmount(value: string, factor: number): string {
   const result = multiply(parseAmount(value), { numerator: BigInt(factor), denominator: 1n });
   return result.denominator === 1n ? result.numerator.toString() : `${result.numerator}/${result.denominator}`;
 }
+
+export function divideRoundUp(amountValue: string, packageSizeValue: string): string {
+  const amount = parseAmount(amountValue);
+  const packageSize = parseAmount(packageSizeValue);
+  const numerator = amount.numerator * packageSize.denominator;
+  const denominator = amount.denominator * packageSize.numerator;
+  return ((numerator + denominator - 1n) / denominator).toString();
+}

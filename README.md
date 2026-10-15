@@ -21,7 +21,9 @@ Las migraciones de catalogo y prescripciones incluyen solo datos proporcionados 
 
 ## Base de datos
 
-Al seleccionar un alimento en Recetas, la cantidad sugerida cubre las porciones restantes de su grupo para el perfil y tiempo seleccionados. Otros ingredientes del mismo grupo se descuentan antes de sugerir la cantidad. Excesos y faltantes se muestran como alertas exactas; no impiden guardar un borrador. Verificar sigue requiriendo que todos los grupos y equivalencias coincidan con la prescripcion. Los alimentos libres no reciben cantidades inventadas.
+Al seleccionar un alimento en Recetas, la cantidad sugerida cubre las porciones restantes de su grupo para el perfil y tiempo seleccionados. Otros ingredientes del mismo grupo se descuentan antes de sugerir la cantidad. Excesos y faltantes se muestran como alertas exactas; no impiden guardar un borrador. Verificar sigue requiriendo que todos los grupos y equivalencias coincidan con la prescripcion. Los alimentos libres no reciben equivalencias; las cantidades domesticas registradas para recetas se usan solo en compras.
+
+Compras permite armar un menu de 1 a 3 dias, con una receta por tiempo de comida y dia, para un perfil y un numero de comensales. Un platillo no se repite en dias consecutivos, pero puede volver despues de un dia diferente. Las cantidades se multiplican por comensal y se agrupan con unidades canonicas. `food_purchase_units` relaciona cada alimento con uno o mas empaques; su contenido debe usar la unidad del ingrediente. La lista conserva la cantidad total y redondea hacia arriba los paquetes completos. La migracion `0006_food_purchase_units.sql` configura inicialmente 11 rebanadas de pan de caja chico por paquete.
 
 La integracion de completions envia `prompt` y `system_prompt`, sin `messages`: el proveedor prioriza `messages` e ignora los prompts cuando ese campo esta presente. Usa `max_tokens=6000` (se traduce a `max_completion_tokens` en el servicio) y lee el JSON de recetas desde la propiedad `text` de la respuesta. Solo se guardan propuestas que pasan la validacion exacta del servidor. La clave permanece exclusivamente en el backend.
 

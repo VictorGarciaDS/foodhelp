@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateEquivalent, equivalentFraction, multiplyAmount, rationallyEqual, sumAmounts } from './exact';
+import { calculateEquivalent, divideRoundUp, equivalentFraction, multiplyAmount, rationallyEqual, sumAmounts } from './exact';
 
 describe('equivalencias exactas', () => {
   it('cubre los ejemplos aritmeticos acordados sin tratarlos como prescripciones', () => {
@@ -23,5 +23,10 @@ describe('equivalencias exactas', () => {
     expect(equivalentFraction('6', '2')).toEqual({ numerator: '3', denominator: '1' });
     expect(rationallyEqual('1.5', '3/2')).toBe(true);
     expect(rationallyEqual('5/6', '1')).toBe(false);
+  });
+  it('rounds purchase packages up without floating point math', () => {
+    expect(divideRoundUp('22', '11')).toBe('2');
+    expect(divideRoundUp('23', '11')).toBe('3');
+    expect(divideRoundUp('1', '1/2')).toBe('2');
   });
 });

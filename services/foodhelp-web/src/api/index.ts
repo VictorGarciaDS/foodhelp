@@ -1,5 +1,5 @@
 import type { CreateFood, EquivalentResult, Food, Person, RecipeCandidate } from '@foodhelp/contracts';
-import type { ApiClient, GeneratedShoppingList, PrescriptionRecord, ShoppingPlan } from './types';
+import type { ApiClient, FoodPurchaseUnit, GeneratedShoppingList, PrescriptionRecord, ShoppingPlan } from './types';
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 	const method = init.method ?? 'GET';
@@ -55,6 +55,9 @@ export const api: ApiClient = {
 	async health() { return requestJson('/health'); },
 	async listFoods() { return (await requestJson<{ items: Food[] }>('/foods')).items; },
 	async createFood(input: CreateFood) { return (await requestJson<{ item: Food }>('/foods', { method: 'POST', body: JSON.stringify(input) })).item; },
+	async setFoodPurchaseUnits(foodId: string, purchaseUnits: FoodPurchaseUnit[]) {
+		return (await requestJson<{ purchaseUnits: FoodPurchaseUnit[] }>(`/foods/${foodId}/purchase-units`, { method: 'PUT', body: JSON.stringify({ purchaseUnits }) })).purchaseUnits;
+	},
 	async listPeople() { return (await requestJson<{ people: Person[] }>('/people')).people; },
 	async createPerson(name) { return (await requestJson<{ person: Person }>('/people', { method: 'POST', body: JSON.stringify({ name }) })).person; },
 	async listPrescriptions(personId) {

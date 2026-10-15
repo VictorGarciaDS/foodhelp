@@ -30,11 +30,21 @@ function validateFoodPortion(value: z.infer<typeof foodPortionSchema>, context: 
     context.addIssue({ code: z.ZodIssueCode.custom, message: 'Un alimento porcionado requiere cantidad base y unidad.' });
   }
 }
+export const purchaseUnitSchema = z.object({
+  unitName: z.string().trim().min(1).max(80), quantity: positiveAmount, unit: z.string().trim().min(1).max(80),
+});
+export const foodPurchaseUnitsSchema = z.object({ purchaseUnits: z.array(purchaseUnitSchema).max(10) }).superRefine((value, context) => {
+  const unitNames = value.purchaseUnits.map((unit) => unit.unitName.toLocaleLowerCase('es'));
+  if (new Set(unitNames).size !== unitNames.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ['purchaseUnits'], message: 'No repitas el nombre de la unidad de compra.' });
+});
 export const foodSchema = foodPortionSchema.extend({
   id: z.string().uuid(), name: z.string(), verifiedAt: z.string().datetime().nullable(),
+  purchaseUnits: z.array(purchaseUnitSchema).max(10).default([]),
 }).superRefine((value, context) => {
   validateFoodPortion(value, context);
   if (value.portionPending && value.verifiedAt !== null) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Una porción pendiente no puede estar verificada.' });
+  const unitNames = value.purchaseUnits.map((unit) => unit.unitName.toLocaleLowerCase('es'));
+  if (new Set(unitNames).size !== unitNames.length) context.addIssue({ code: z.ZodIssueCode.custom, path: ['purchaseUnits'], message: 'No repitas el nombre de la unidad de compra.' });
 });
 export const createFoodSchema = foodPortionSchema.extend({
   name: z.string().trim().min(1).max(160), verified: z.boolean(),
@@ -123,19 +133,25 @@ export const recipeDiscoverySchema = z.object({
   path: ['mainFoodIds'], message: 'No repitas ingredientes principales.',
 });
 const shoppingMealSelectionSchema = z.object({
-  mealTime: z.enum(mealTimes), recipeIds: z.array(z.string().uuid()).min(1).max(31),
-}).refine((meal) => new Set(meal.recipeIds).size === meal.recipeIds.length, {
-  path: ['recipeIds'], message: 'No repitas una receta en la misma selección.',
+  mealTime: z.enum(mealTimes), recipeIds: z.array(z.string().uuid()).min(1).max(3),
+}).refine((meal) => meal.recipeIds.every((recipeId, index) => index === 0 || recipeId !== meal.recipeIds[index - 1]), {
+  path: ['recipeIds'], message: 'No repitas una receta en días consecutivos.',
 });
 export const shoppingPlanSchema = z.object({
-  days: z.number().int().min(1).max(31),
-  participants: z.array(z.object({ personId: z.string().uuid(), days: z.number().int().min(1).max(31).optional(), meals: z.array(shoppingMealSelectionSchema).length(4) })).min(1).max(6),
+  days: z.number().int().min(1).max(3),
+  peopleCount: z.number().int().min(1).max(31),
+  participants: z.array(z.object({ personId: z.string().uuid(), meals: z.array(shoppingMealSelectionSchema).length(4) })).length(1),
 }).superRefine((plan, context) => {
   plan.participants.forEach((participant, participantIndex) => {
     const selectedTimes = participant.meals.map((meal) => meal.mealTime);
     if (new Set(selectedTimes).size !== 4 || mealTimes.some((mealTime) => !selectedTimes.includes(mealTime))) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['participants', participantIndex, 'meals'], message: 'Selecciona al menos una receta para cada tiempo de comida.' });
     }
+    participant.meals.forEach((meal, mealIndex) => {
+      if (meal.recipeIds.length !== plan.days) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ['participants', participantIndex, 'meals', mealIndex, 'recipeIds'], message: 'Selecciona exactamente una receta por día.' });
+      }
+    });
   });
 });
 export const suggestionsRequestSchema = z.object({

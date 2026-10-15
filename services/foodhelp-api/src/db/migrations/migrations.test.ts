@@ -13,6 +13,12 @@ describe('foodhelp schema migration', () => {
     expect(migration).toContain('review_notes');
     expect(migration).toContain('NOT EXISTS');
   });
+  it('relates exact purchase-pack quantities to catalog foods', () => {
+    const migration = readFileSync(resolve(__dirname, '0006_food_purchase_units.sql'), 'utf8');
+    expect(migration).toContain('CREATE TABLE foodhelp.food_purchase_units');
+    expect(migration).toContain('REFERENCES foodhelp.foods(id) ON DELETE CASCADE');
+    expect(migration).toContain("SELECT id, 'paquetes', '11', 'rebanadas'");
+  });
   it('simplifies people and confirms Ades without saving unreviewed recipes', () => {
     const migration = readFileSync(resolve(__dirname, '0004_people_and_food_corrections.sql'), 'utf8');
     expect(migration.match(/ALTER TABLE foodhelp.people DROP COLUMN/g)).toHaveLength(3);

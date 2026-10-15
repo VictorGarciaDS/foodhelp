@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Food } from '@foodhelp/contracts';
 import { defaultIngredientQuantity, prescriptionAlerts } from './recipe-portions';
 
-const chicken: Food = { id: 'chicken', name: 'Pechuga de pollo', group: 'Proteinas', baseQuantity: '30', unit: 'g', isFreeConsumption: false, verifiedAt: null };
+const chicken: Food = { id: 'chicken', name: 'Pechuga de pollo', group: 'Proteinas', baseQuantity: '30', unit: 'g', isFreeConsumption: false, verifiedAt: null, purchaseUnits: [] };
 const meals = [{ mealTime: 'Comida', group: 'Proteinas' as const, equivalents: '4', requirementKind: 'exact' as const }];
 const ingredient = (quantity: string) => ({ foodId: chicken.id, quantity, unit: 'g', group: chicken.group, isFreeConsumption: false });
 

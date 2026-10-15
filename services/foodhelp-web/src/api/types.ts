@@ -8,10 +8,10 @@ export type RecipeSummary = { id: string; name: string; verifiedAt: string | nul
 export type RecipeMatch = RecipeSummary & { matchCount: number; matchedFoodIds: string[] };
 export type RecipeIngredient = RecipeCandidate['ingredients'][number];
 export type RecipeDetail = RecipeSummary & { instructions: string[]; ingredients: RecipeIngredient[]; sourceText: string | null };
-export type ShoppingParticipant = { personId: string; days?: number; meals: { mealTime: 'Desayuno' | 'Almuerzo' | 'Comida' | 'Cena'; recipeIds: string[] }[] };
-export type ShoppingPlan = { days: number; participants: ShoppingParticipant[] };
-export type GeneratedShoppingList = { days: number; participantCount: number; participants: { personId: string; days: number }[]; usage: { personId: string; mealTime: string; recipeId: string; day: number }[]; items: ShoppingItem[] };
-export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string };
+export type ShoppingPlan = { days: number; peopleCount: number; participants: { personId: string; meals: { mealTime: 'Desayuno' | 'Almuerzo' | 'Comida' | 'Cena'; recipeIds: string[] }[] }[] };
+export type GeneratedShoppingList = { days: number; participantCount: number; peopleCount: number; participants: { personId: string; days: number }[]; usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[]; items: ShoppingItem[] };
+export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string; purchaseOptions: { unitName: string; quantity: string; contents: string; unit: string }[] };
+export type FoodPurchaseUnit = Food['purchaseUnits'][number];
 export type PrescriptionInput = {
   month: string;
   reviewed: true;
@@ -23,6 +23,7 @@ export interface ApiClient {
   health(): Promise<{ status: string; services: Record<string, string> }>;
   listFoods(): Promise<Food[]>;
   createFood(input: CreateFood): Promise<Food>;
+  setFoodPurchaseUnits(foodId: string, purchaseUnits: FoodPurchaseUnit[]): Promise<FoodPurchaseUnit[]>;
   listPeople(): Promise<Person[]>;
   createPerson(name: string): Promise<Person>;
   listPrescriptions(personId: string): Promise<PrescriptionRecord[]>;

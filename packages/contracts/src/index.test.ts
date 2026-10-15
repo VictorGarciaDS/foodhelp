@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateEquivalentSchema, createFoodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema } from './index';
+import { calculateEquivalentSchema, createFoodSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema } from './index';
 
 describe('shared request contracts', () => {
   it('keeps the Ades portion pending rather than treating it as free or verified', () => {
@@ -20,6 +20,12 @@ describe('shared request contracts', () => {
     expect(createFoodSchema.safeParse(freeFood).success).toBe(true);
     expect(createFoodSchema.safeParse({ ...freeFood, baseQuantity: '1', unit: 'pieza' }).success).toBe(false);
     expect(createFoodSchema.safeParse({ ...freeFood, group: 'Azucar' }).success).toBe(false);
+  });
+  it('accepts exact food purchase-pack conversions and rejects duplicate package names', () => {
+    const food = { id: '00000000-0000-4000-8000-000000000001', name: 'Pan de caja', group: 'Cereales y leguminosas', baseQuantity: '1', unit: 'rebanada', isFreeConsumption: false, portionPending: false, verifiedAt: '2026-10-05T12:00:00.000Z' };
+    const purchaseUnits = [{ unitName: 'paquetes', quantity: '11', unit: 'rebanadas' }];
+    expect(foodSchema.safeParse({ ...food, purchaseUnits }).success).toBe(true);
+    expect(foodSchema.safeParse({ ...food, purchaseUnits: [...purchaseUnits, ...purchaseUnits] }).success).toBe(false);
   });
 
   it('accepts exact fractional quantities for equivalent calculations', () => {
@@ -48,16 +54,18 @@ describe('shared request contracts', () => {
     expect(personSchema.safeParse({ id: '00000000-0000-4000-8000-000000000001', name: 'Patricia', prescriptionComplete: true }).success).toBe(true);
   });
 
-  it('requires one selected recipe per meal for up to six participants', () => {
+  it('requires one recipe per meal and day, one menu profile, and a diner count', () => {
     const participant = {
       personId: '00000000-0000-4000-8000-000000000001',
-      meals: ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime, recipeIds: ['00000000-0000-4000-8000-000000000002'] })),
+      meals: ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime, recipeIds: ['00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003'] })),
     };
-    expect(shoppingPlanSchema.safeParse({ days: 3, participants: [participant] }).success).toBe(true);
-    expect(shoppingPlanSchema.safeParse({ days: 6, participants: [{ ...participant, days: 4 }] }).success).toBe(true);
-    expect(shoppingPlanSchema.safeParse({ days: 6, participants: [{ ...participant, days: 32 }] }).success).toBe(false);
-    expect(shoppingPlanSchema.safeParse({ days: 3, participants: Array(7).fill(participant) }).success).toBe(false);
-    expect(shoppingPlanSchema.safeParse({ days: 3, participants: [{ ...participant, meals: participant.meals.slice(0, 3) }] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 3, participants: [participant] }).success).toBe(true);
+    expect(shoppingPlanSchema.safeParse({ days: 4, peopleCount: 3, participants: [participant] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 0, participants: [participant] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 3, participants: [participant, participant] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 3, participants: [{ ...participant, meals: participant.meals.map((meal) => ({ ...meal, recipeIds: meal.recipeIds.slice(0, 1) })) }] }).success).toBe(false);
+    const rotation = { ...participant, meals: participant.meals.map((meal) => ({ ...meal, recipeIds: ['00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000002'] })) };
+    expect(shoppingPlanSchema.safeParse({ days: 3, peopleCount: 3, participants: [rotation] }).success).toBe(true);
   });
 
   it('requires recipe ingredients before confirming it for planning', () => {
