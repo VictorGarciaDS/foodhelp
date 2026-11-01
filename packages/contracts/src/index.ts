@@ -56,8 +56,13 @@ export const createFoodSchema = foodPortionSchema.extend({
 });
 export const personSchema = z.object({
   id: z.string().uuid(), name: z.string(), prescriptionComplete: z.boolean(),
+  basePersonId: z.string().uuid().nullable().optional(),
 });
-export const createPersonSchema = z.object({ name: z.string().trim().min(1).max(120) });
+export const createPersonSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  basePersonId: z.string().uuid().nullable().optional(),
+});
+export const inheritRecipesSchema = z.object({ basePersonId: z.string().uuid() });
 export const prescriptionSchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), reviewed: z.literal(true),
   indicatedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {

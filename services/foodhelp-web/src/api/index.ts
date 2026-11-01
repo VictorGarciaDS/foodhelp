@@ -1,5 +1,5 @@
 import type { CreateFood, EquivalentResult, Food, Person, RecipeCandidate } from '@foodhelp/contracts';
-import type { ApiClient, FoodPurchaseUnit, GeneratedShoppingList, PrescriptionRecord, ShoppingPlan } from './types';
+import type { ApiClient, FoodPurchaseUnit, GeneratedShoppingList, PrescriptionRecord, RecipeInheritanceResult, ShoppingPlan } from './types';
 
 async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 	const method = init.method ?? 'GET';
@@ -59,12 +59,15 @@ export const api: ApiClient = {
 		return (await requestJson<{ purchaseUnits: FoodPurchaseUnit[] }>(`/foods/${foodId}/purchase-units`, { method: 'PUT', body: JSON.stringify({ purchaseUnits }) })).purchaseUnits;
 	},
 	async listPeople() { return (await requestJson<{ people: Person[] }>('/people')).people; },
-	async createPerson(name) { return (await requestJson<{ person: Person }>('/people', { method: 'POST', body: JSON.stringify({ name }) })).person; },
+	async createPerson(name, basePersonId) { return (await requestJson<{ person: Person }>('/people', { method: 'POST', body: JSON.stringify({ name, basePersonId: basePersonId || null }) })).person; },
+	async inheritRecipes(personId, basePersonId) {
+		return (await requestJson<{ inheritance: RecipeInheritanceResult }>(`/people/${personId}/inherit-recipes`, { method: 'POST', body: JSON.stringify({ basePersonId }) })).inheritance;
+	},
 	async listPrescriptions(personId) {
 		return (await requestJson<{ prescriptions: PrescriptionRecord[] }>(`/people/${personId}/prescriptions`)).prescriptions;
 	},
 	async savePrescription(personId, input) {
-		await requestJson(`/people/${personId}/prescription`, { method: 'PUT', body: JSON.stringify(input) });
+		return (await requestJson<{ inheritance: RecipeInheritanceResult | { error: string } | null }>(`/people/${personId}/prescription`, { method: 'PUT', body: JSON.stringify(input) })).inheritance;
 	},
 	async deletePrescription(personId, prescriptionId) {
 		await requestJson(`/people/${personId}/prescriptions/${prescriptionId}`, { method: 'DELETE' });

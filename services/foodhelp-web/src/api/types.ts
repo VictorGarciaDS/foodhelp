@@ -12,6 +12,7 @@ export type ShoppingPlan = { days: number; peopleCount: number; participants: { 
 export type GeneratedShoppingList = { days: number; participantCount: number; peopleCount: number; participants: { personId: string; days: number }[]; usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[]; items: ShoppingItem[] };
 export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string; purchaseOptions: { unitName: string; quantity: string; contents: string; unit: string; purchaseUnit: string; isApproximate: boolean }[]; purchasePending: boolean };
 export type FoodPurchaseUnit = Food['purchaseUnits'][number];
+export type RecipeInheritanceResult = { copied: number; identical: number; proportional: number; different: number; verified: number; drafts: number };
 export type PrescriptionInput = {
   month: string;
   reviewed: true;
@@ -25,9 +26,10 @@ export interface ApiClient {
   createFood(input: CreateFood): Promise<Food>;
   setFoodPurchaseUnits(foodId: string, purchaseUnits: FoodPurchaseUnit[]): Promise<FoodPurchaseUnit[]>;
   listPeople(): Promise<Person[]>;
-  createPerson(name: string): Promise<Person>;
+  createPerson(name: string, basePersonId?: string | null): Promise<Person>;
+  inheritRecipes(personId: string, basePersonId: string): Promise<RecipeInheritanceResult>;
   listPrescriptions(personId: string): Promise<PrescriptionRecord[]>;
-  savePrescription(personId: string, input: PrescriptionInput): Promise<void>;
+  savePrescription(personId: string, input: PrescriptionInput): Promise<RecipeInheritanceResult | { error: string } | null>;
   deletePrescription(personId: string, prescriptionId: string): Promise<void>;
   calculateEquivalent(foodId: string, quantity: string, unit: string): Promise<EquivalentResult>;
   listRecipes(): Promise<RecipeSummary[]>;

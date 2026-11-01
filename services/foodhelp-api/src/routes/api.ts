@@ -2,10 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   calculateEquivalentSchema, createFoodSchema, createPersonSchema, foodPurchaseUnitsSchema, generateMenuRequestSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema,
-  idPathSchema, pdfRequestSchema, personPathSchema, prescriptionPathSchema, prescriptionSchema, shoppingListQuerySchema,
+  idPathSchema, inheritRecipesSchema, pdfRequestSchema, personPathSchema, prescriptionPathSchema, prescriptionSchema, shoppingListQuerySchema,
   suggestionsRequestSchema, weekPathSchema,
 } from '@foodhelp/contracts';
 import type { RecipeEdit } from '@foodhelp/contracts';
+import { planInheritance, type PrescriptionRow } from '../domain/recipes/inheritance';
 import { getPool } from '../db/pool';
 import { calculateEquivalent, divideRoundUp, equivalentFraction, multiplyAmount, multiplyAmounts, rationallyEqual, sumAmounts } from '../domain/equivalents/exact';
 import { getGenerationBlockReason } from '../domain/menus/generation-readiness';
@@ -89,6 +90,72 @@ async function validateRecipeForProfile(input: RecipeEdit): Promise<void> {
     return !rationallyEqual(actual, target);
   });
   if (mismatches.length) throw new ApiError(422, 'VALIDATION_ERROR', `Las equivalencias no coinciden con la prescripción para: ${mismatches.join(', ')}.`);
+}
+
+async function latestPrescriptionRows(personId: string): Promise<Map<string, PrescriptionRow[]>> {
+  const result = await getPool().query<PrescriptionRow & { mealTime: string }>(
+    `SELECT pi.meal_time AS "mealTime", pi.food_group AS "group", pi.equivalents::text AS equivalents, pi.requirement_kind AS "requirementKind"
+     FROM foodhelp.prescription_items pi JOIN foodhelp.prescriptions pr ON pr.id = pi.prescription_id
+     WHERE pr.person_id = $1 AND pr.reviewed_at IS NOT NULL
+       AND pr.month = (SELECT max(month) FROM foodhelp.prescriptions WHERE person_id = $1 AND reviewed_at IS NOT NULL)`,
+    [personId],
+  );
+  const rows = new Map<string, PrescriptionRow[]>();
+  for (const row of result.rows) rows.set(row.mealTime, [...(rows.get(row.mealTime) ?? []), row]);
+  return rows;
+}
+
+async function inheritRecipes(personId: string, basePersonId: string) {
+  if (personId === basePersonId) throw new ApiError(422, 'VALIDATION_ERROR', 'Selecciona un perfil base distinto.');
+  const pool = getPool();
+  const people = await pool.query('SELECT id FROM foodhelp.people WHERE id = ANY($1::uuid[])', [[personId, basePersonId]]);
+  if (people.rowCount !== 2) throw new ApiError(404, 'NOT_FOUND', 'Persona o perfil base no encontrado.');
+  const [baseRows, targetRows] = await Promise.all([latestPrescriptionRows(basePersonId), latestPrescriptionRows(personId)]);
+  if (!targetRows.size) throw new ApiError(409, 'MENU_BLOCKED', 'Guarda primero la prescripción del nuevo perfil para ajustar las recetas heredadas.');
+  const recipes = await pool.query(
+    `SELECT r.id, r.name, r.meal_time AS "mealTime", r.source_text AS "sourceText", r.review_notes AS "reviewNotes",
+            r.instructions, r.ingredients, r.verified_at AS "verifiedAt", r.image_url AS "imageUrl",
+            r.image_attribution AS "imageAttribution", r.image_license AS "imageLicense"
+     FROM foodhelp.recipes r
+     WHERE r.person_id = $1
+       AND NOT EXISTS (
+         SELECT 1 FROM foodhelp.recipes copy
+         WHERE copy.person_id = $2 AND (copy.inherited_from_recipe_id = r.id OR (copy.name = r.name AND copy.meal_time = r.meal_time))
+       )
+     ORDER BY r.meal_time, r.name`,
+    [basePersonId, personId],
+  );
+  const summary = { identical: 0, proportional: 0, different: 0, verified: 0, drafts: 0 };
+  for (const recipe of recipes.rows) {
+    const plan = planInheritance(baseRows.get(recipe.mealTime) ?? [], targetRows.get(recipe.mealTime) ?? [], recipe.ingredients as RecipeEdit['ingredients']);
+    summary[plan.mode] += 1;
+    const reviewNotes = [...(recipe.reviewNotes as string[]), ...plan.notes];
+    const edit: RecipeEdit = {
+      personId, name: recipe.name, mealTime: recipe.mealTime, sourceText: recipe.sourceText ?? recipe.name,
+      reviewNotes, instructions: recipe.instructions, ingredients: plan.ingredients,
+      imageUrl: recipe.imageUrl, imageAttribution: recipe.imageAttribution, imageLicense: recipe.imageLicense,
+      verify: Boolean(recipe.verifiedAt) && plan.mode !== 'different' && reviewNotes.length === 0,
+    };
+    if (edit.verify) {
+      try {
+        await validateRecipeForProfile(edit);
+      } catch (error) {
+        edit.verify = false;
+        edit.reviewNotes = [...edit.reviewNotes, error instanceof Error ? error.message : 'Revisa las equivalencias heredadas.'];
+      }
+    }
+    await pool.query(
+      `INSERT INTO foodhelp.recipes
+         (person_id, name, meal_time, source_text, review_notes, instructions, ingredients, verified_at,
+          image_url, image_attribution, image_license, inherited_from_recipe_id)
+       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, CASE WHEN $8 THEN now() ELSE NULL END, $9, $10, $11, $12)
+       ON CONFLICT DO NOTHING`,
+      [personId, edit.name, edit.mealTime, edit.sourceText, edit.reviewNotes, JSON.stringify(edit.instructions), JSON.stringify(edit.ingredients),
+        edit.verify, edit.imageUrl ?? null, edit.imageAttribution ?? null, edit.imageLicense ?? null, recipe.id],
+    );
+    summary[edit.verify ? 'verified' : 'drafts'] += 1;
+  }
+  return { copied: recipes.rowCount ?? 0, ...summary };
 }
 
 async function getGenerationReadiness(weekStart: string, peopleIds: string[]) {
@@ -180,7 +247,7 @@ export function createApiRouter(): Router {
 
   router.get('/people', async (_request, response) => {
     const result = await getPool().query(
-      `SELECT p.id, p.name,
+      `SELECT p.id, p.name, p.base_person_id AS "basePersonId",
               EXISTS (
                 SELECT 1 FROM foodhelp.prescriptions pr
                 WHERE pr.person_id = p.id AND pr.reviewed_at IS NOT NULL
@@ -193,11 +260,21 @@ export function createApiRouter(): Router {
 
   router.post('/people', async (request, response) => {
     const input = parseRequest(createPersonSchema, request.body);
+    if (input.basePersonId) {
+      const base = await getPool().query('SELECT id FROM foodhelp.people WHERE id = $1', [input.basePersonId]);
+      if (!base.rowCount) throw new ApiError(404, 'NOT_FOUND', 'Perfil base no encontrado.');
+    }
     const result = await getPool().query(
-      'INSERT INTO foodhelp.people (name) VALUES ($1) RETURNING id, name',
-      [input.name],
+      'INSERT INTO foodhelp.people (name, base_person_id) VALUES ($1, $2) RETURNING id, name, base_person_id AS "basePersonId"',
+      [input.name, input.basePersonId ?? null],
     );
     response.status(201).json({ person: { ...result.rows[0], prescriptionComplete: false } });
+  });
+
+  router.post('/people/:personId/inherit-recipes', async (request, response) => {
+    const { personId } = parseRequest(personPathSchema, request.params);
+    const input = parseRequest(inheritRecipesSchema, request.body);
+    response.json({ inheritance: await inheritRecipes(personId, input.basePersonId) });
   });
 
   router.get('/people/:personId/prescriptions', async (request, response) => {
@@ -233,7 +310,7 @@ export function createApiRouter(): Router {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const person = await client.query('SELECT id FROM foodhelp.people WHERE id = $1 FOR UPDATE', [personId]);
+      const person = await client.query<{ basePersonId: string | null }>('SELECT base_person_id AS "basePersonId" FROM foodhelp.people WHERE id = $1 FOR UPDATE', [personId]);
       if (person.rowCount === 0) throw new ApiError(404, 'NOT_FOUND', 'Persona no encontrada.');
       const preferredIds = input.meals.flatMap((meal) => meal.preferredFoodId ? [meal.preferredFoodId] : []);
       if (preferredIds.length) {
@@ -261,7 +338,11 @@ export function createApiRouter(): Router {
       }
       await client.query('UPDATE foodhelp.recipes SET verified_at = NULL WHERE person_id = $1', [personId]);
       await client.query('COMMIT');
-      response.json({ prescription: { id: prescriptionId, personId, month: input.month, indicatedOn: input.indicatedOn, reviewed: true, meals: input.meals } });
+      const basePersonId = person.rows[0].basePersonId;
+      const inheritance = basePersonId
+        ? await inheritRecipes(personId, basePersonId).catch((error: unknown) => ({ error: error instanceof Error ? error.message : 'No se pudieron heredar las recetas.' }))
+        : null;
+      response.json({ prescription: { id: prescriptionId, personId, month: input.month, indicatedOn: input.indicatedOn, reviewed: true, meals: input.meals }, inheritance });
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;

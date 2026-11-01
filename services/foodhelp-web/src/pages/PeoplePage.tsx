@@ -3,7 +3,7 @@ import { Button, Checkbox, Dialog, DialogActions, DialogBody, DialogContent, Dia
 import { AddRegular, ArrowClockwiseRegular, DeleteRegular, DismissRegular, EditRegular, SaveRegular } from '@fluentui/react-icons';
 import { prescriptionFoodGroups, prescriptionSchema } from '@foodhelp/contracts';
 import { api } from '../api';
-import type { PrescriptionInput, PrescriptionRecord } from '../api/types';
+import type { PrescriptionInput, PrescriptionRecord, RecipeInheritanceResult } from '../api/types';
 import { PageFrame, SectionHeading } from '../components/PageFrame';
 import { useResource } from '../hooks/useResource';
 
@@ -11,6 +11,9 @@ type MealRow = PrescriptionInput['meals'][number] & { key: string };
 type Editor = { id?: string; month: string; indicatedOn: string; reviewed: boolean; meals: MealRow[] };
 const groupLabel = (group: string) => ({ Proteinas: 'Proteínas', Azucar: 'Azúcar', Lacteos: 'Lácteos' }[group] ?? group);
 const emptyMeal = (): MealRow => ({ key: crypto.randomUUID(), mealTime: '', group: 'Frutas', equivalents: '', requirementKind: 'exact', preferredFoodId: null, notes: null });
+const inheritanceMessage = (result: RecipeInheritanceResult) => result.copied === 0
+  ? 'No había recetas nuevas que heredar.'
+  : `Recetas heredadas: ${result.copied} (${result.identical} sin cambios, ${result.proportional} ajustadas proporcionalmente, ${result.different} con prescripción distinta). Verificadas: ${result.verified}; por revisar: ${result.drafts}.`;
 
 export function PeoplePage() {
   const { data, busy, error, reload } = useResource(() => api.listPeople(), 0);
@@ -30,6 +33,10 @@ export function PeoplePage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formMessage, setFormMessage] = useState<string | null>(null);
+  const [newBasePersonId, setNewBasePersonId] = useState('');
+  const [inheritBaseId, setInheritBaseId] = useState('');
+  const baseOptions = people.filter((person) => person.id !== personId);
+  const inheritFromId = baseOptions.some((person) => person.id === inheritBaseId) ? inheritBaseId : selectedPerson?.basePersonId ?? baseOptions[0]?.id ?? '';
   const pageState = error ? 'error' : busy ? 'loading' : 'data';
 
   function clearMessages() { setFormError(null); setFormMessage(null); }
@@ -45,9 +52,17 @@ export function PeoplePage() {
     const form = event.currentTarget;
     clearMessages(); setSaving(true);
     try {
-      const person = await api.createPerson(new FormData(form).get('name')?.toString().trim() ?? '');
-      form.reset(); setSelectedPersonId(person.id); setEditor(null); reload();
+      const person = await api.createPerson(new FormData(form).get('name')?.toString().trim() ?? '', newBasePersonId || null);
+      form.reset(); setNewBasePersonId(''); setSelectedPersonId(person.id); setEditor(null); reload();
+      if (person.basePersonId) setFormMessage('Persona creada. Al guardar su prescripción se heredarán y ajustarán las recetas del perfil base.');
     } catch (caught) { setFormError(caught instanceof Error ? caught.message : 'No se pudo guardar la persona.'); }
+    finally { setSaving(false); }
+  }
+  async function inheritNow() {
+    if (!personId || !inheritFromId) return;
+    clearMessages(); setSaving(true);
+    try { setFormMessage(inheritanceMessage(await api.inheritRecipes(personId, inheritFromId))); }
+    catch (caught) { setFormError(caught instanceof Error ? caught.message : 'No se pudieron heredar las recetas.'); }
     finally { setSaving(false); }
   }
   async function savePrescription(event: FormEvent<HTMLFormElement>) {
@@ -58,8 +73,9 @@ export function PeoplePage() {
       if (!editor.id && prescriptions.data?.some((record) => record.month === editor.month)) throw new Error('Ya existe una prescripción para ese mes. Usa Editar para modificarla.');
       const input = prescriptionSchema.safeParse({ month: editor.month, indicatedOn: editor.indicatedOn || null, reviewed: editor.reviewed, meals: editor.meals });
       if (!input.success) throw new Error(input.error.issues.map((issue) => issue.message).join(' '));
-      await api.savePrescription(personId, input.data);
-      setEditor(null); prescriptions.reload(); reload(); setFormMessage('Prescripción completa guardada.');
+      const inheritance = await api.savePrescription(personId, input.data);
+      setEditor(null); prescriptions.reload(); reload();
+      setFormMessage(inheritance && 'error' in inheritance ? `Prescripción guardada. ${inheritance.error}` : inheritance ? `Prescripción guardada. ${inheritanceMessage(inheritance)}` : 'Prescripción completa guardada.');
     } catch (caught) { setFormError(caught instanceof Error ? caught.message : 'Revisa los valores capturados.'); }
     finally { setSaving(false); }
   }
@@ -78,7 +94,8 @@ export function PeoplePage() {
     <PageFrame title="Personas y prescripciones" subtitle="Indicaciones mensuales por persona" state={pageState} hasData={true} error={error} onRetry={reload} emptyTitle="No hay personas" emptyText="Agrega una persona para registrar su prescripción.">
       <section className="content-section person-selector">
         <Field label="Persona seleccionada"><Select disabled={saving || people.length === 0} value={personId} onChange={(event) => { setSelectedPersonId(event.currentTarget.value); setEditor(null); clearMessages(); }}>{people.length === 0 && <option value="">Sin personas registradas</option>}{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
-        <form className="form-panel" onSubmit={addPerson}><SectionHeading>Agregar persona</SectionHeading><Field label="Nombre" required><Input name="name" required maxLength={120} disabled={saving} /></Field><Button type="submit" icon={<AddRegular />} disabled={saving}>Agregar</Button></form>
+        <form className="form-panel" onSubmit={addPerson}><SectionHeading>Agregar persona</SectionHeading><Field label="Nombre" required><Input name="name" required maxLength={120} disabled={saving} /></Field><Field label="Heredar recetas de" hint="Se ajustan a la prescripción del nuevo perfil al guardarla."><Select value={newBasePersonId} disabled={saving} onChange={(event) => setNewBasePersonId(event.currentTarget.value)}><option value="">Sin perfil base</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field><Button type="submit" icon={<AddRegular />} disabled={saving}>Agregar</Button></form>
+        {baseOptions.length > 0 && <div className="form-panel"><SectionHeading detail="Copia sin duplicar las recetas que falten">Heredar recetas</SectionHeading><Field label={`Perfil base para ${selectedPerson?.name ?? 'esta persona'}`}><Select value={inheritFromId} disabled={saving} onChange={(event) => setInheritBaseId(event.currentTarget.value)}>{baseOptions.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field><Button icon={<ArrowClockwiseRegular />} disabled={saving || !personId || !inheritFromId} onClick={inheritNow}>Heredar recetas</Button></div>}
       </section>
       {formError && <p className="form-error" role="alert">{formError}</p>}
       {formMessage && <p className="form-success" role="status">{formMessage}</p>}
