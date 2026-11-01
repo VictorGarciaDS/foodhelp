@@ -43,5 +43,6 @@ export interface ApiClient {
   generateMenu(weekStart: string, peopleIds: string[]): Promise<void>;
   getShopping(weekStart: string, peopleIds: string[]): Promise<ShoppingItem[]>;
   calculateShopping(input: ShoppingPlan): Promise<GeneratedShoppingList>;
+  downloadShoppingPdf(input: ShoppingPlan): Promise<void>;
   exportPdf(kind: 'menu' | 'shopping', weekStart: string, peopleIds: string[]): Promise<void>;
 }

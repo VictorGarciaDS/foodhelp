@@ -42,6 +42,9 @@ export const foodPurchaseUnitsSchema = z.object({ purchaseUnits: z.array(purchas
 export const foodSchema = foodPortionSchema.extend({
   id: z.string().uuid(), name: z.string(), verifiedAt: z.string().datetime().nullable(),
   purchaseUnits: z.array(purchaseUnitSchema).max(10).default([]),
+  imageUrl: z.string().nullable().optional(),
+  imageAttribution: z.string().nullable().optional(),
+  imageLicense: z.string().nullable().optional(),
 }).superRefine((value, context) => {
   validateFoodPortion(value, context);
   if (value.portionPending && value.verifiedAt !== null) context.addIssue({ code: z.ZodIssueCode.custom, message: 'Una porción pendiente no puede estar verificada.' });
@@ -111,7 +114,7 @@ export const recipeEditSchema = z.object({
   personId: z.string().uuid(),
   name: z.string().trim().min(1).max(160),
   mealTime: z.enum(mealTimes),
-  imageUrl: z.string().url().max(2000).nullable().optional(),
+  imageUrl: z.string().max(2000).refine((value) => /^https:\/\//.test(value) || /^\/images\/[\w\-/]+\.(jpe?g|png|webp)$/.test(value), 'Usa una URL https o una imagen local.').nullable().optional(),
   imageAttribution: z.string().trim().max(500).nullable().optional(),
   imageLicense: z.string().trim().max(200).nullable().optional(),
   sourceText: z.string().trim().min(1).max(6000),

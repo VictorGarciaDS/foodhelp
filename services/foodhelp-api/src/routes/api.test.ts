@@ -266,8 +266,8 @@ describe('catalog and prescription routes', () => {
     await expect(response.json()).resolves.toMatchObject({
       participantCount: 2,
       items: expect.arrayContaining([
-        { foodId, name: 'Tortilla', quantity: '48', unit: 'piezas', purchaseOptions: [], purchasePending: true },
-        { foodId: freeFoodId, name: 'Espinaca', quantity: '12', unit: 'tazas', purchaseOptions: [], purchasePending: true },
+        { foodId, name: 'Tortilla', group: 'Otros', quantity: '48', unit: 'piezas', purchaseOptions: [], purchasePending: true },
+        { foodId: freeFoodId, name: 'Espinaca', group: 'Otros', quantity: '12', unit: 'tazas', purchaseOptions: [], purchasePending: true },
       ]),
     });
   });

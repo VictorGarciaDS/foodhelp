@@ -106,6 +106,28 @@ export const api: ApiClient = {
 	async calculateShopping(input: ShoppingPlan): Promise<GeneratedShoppingList> {
 		return requestJson('/shopping-list/calculate', { method: 'POST', body: JSON.stringify(input) });
 	},
+	async downloadShoppingPdf(input: ShoppingPlan) {
+		let response: Response;
+		try {
+			response = await fetch('/api/shopping-list/pdf', {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'Content-Type': 'application/json', 'x-foodhelp-request': '1' },
+				body: JSON.stringify(input),
+			});
+		} catch {
+			throw new Error('No se pudo conectar con FoodHelp. Comprueba que el servidor esté activo.');
+		}
+		if (!response.ok) {
+			const payload = await response.json().catch(() => null) as { error?: { message?: string } } | null;
+			throw new Error(payload?.error?.message ?? `No se pudo generar el PDF (${response.status}).`);
+		}
+		const url = URL.createObjectURL(await response.blob());
+		const link = document.createElement('a');
+		link.href = url;
+		link.download = 'foodhelp-compras.pdf';
+		link.click();
+		URL.revokeObjectURL(url);
+	},
 	async exportPdf(kind, weekStart, peopleIds) { await downloadPdf(kind, weekStart, peopleIds); },
 };
 

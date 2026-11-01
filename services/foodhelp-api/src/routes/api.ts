@@ -10,7 +10,7 @@ import { planInheritance, type PrescriptionRow } from '../domain/recipes/inherit
 import { getPool } from '../db/pool';
 import { calculateEquivalent, divideRoundUp, equivalentFraction, multiplyAmount, multiplyAmounts, rationallyEqual, sumAmounts } from '../domain/equivalents/exact';
 import { getGenerationBlockReason } from '../domain/menus/generation-readiness';
-import { streamPdf } from '../exports/pdf';
+import { streamPdf, streamShoppingPdf } from '../exports/pdf';
 import { ApiError, parseRequest } from '../errors';
 import { requestRecipeProposals } from '../integrations/completion-api';
 
@@ -189,6 +189,7 @@ export function createApiRouter(): Router {
     const result = await getPool().query(
       `SELECT f.id, f.name, f.food_group AS "group", f.base_quantity AS "baseQuantity", f.unit,
               f.is_free_consumption AS "isFreeConsumption", f.portion_pending AS "portionPending", f.verified_at AS "verifiedAt",
+              f.image_url AS "imageUrl", f.image_attribution AS "imageAttribution", f.image_license AS "imageLicense",
               COALESCE((SELECT jsonb_agg(jsonb_build_object(
                           'unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit,
                           'purchaseQuantity', pu.purchase_quantity, 'purchaseUnit', pu.purchase_unit,
@@ -606,15 +607,15 @@ export function createApiRouter(): Router {
     response.json({ items: result.rows });
   });
 
-  router.post('/shopping-list/calculate', async (request, response) => {
-    const input = parseRequest(shoppingPlanSchema, request.body);
+  async function calculateShoppingList(body: unknown) {
+    const input = parseRequest(shoppingPlanSchema, body);
     const participant = input.participants[0];
-    const person = await getPool().query('SELECT id FROM foodhelp.people WHERE id = $1', [participant.personId]);
+    const person = await getPool().query<{ name: string }>('SELECT name FROM foodhelp.people WHERE id = $1', [participant.personId]);
     if (!person.rowCount) throw new ApiError(404, 'NOT_FOUND', 'La persona seleccionada ya no existe.');
 
     const recipeIds = [...new Set(participant.meals.flatMap((meal) => meal.recipeIds))];
     const recipeResult = await getPool().query(
-      `SELECT id, person_id AS "personId", meal_time AS "mealTime", ingredients
+      `SELECT id, name, person_id AS "personId", meal_time AS "mealTime", ingredients
        FROM foodhelp.recipes WHERE id = ANY($1::uuid[]) AND verified_at IS NOT NULL`, [recipeIds],
     );
     const recipes = new Map(recipeResult.rows.map((recipe) => [recipe.id as string, recipe]));
@@ -653,7 +654,7 @@ export function createApiRouter(): Router {
 
     const foodIds = [...new Set([...ingredientTotals.values()].map((item) => item.foodId))];
     const foodResult = foodIds.length ? await getPool().query(
-      `SELECT f.id, f.name,
+      `SELECT f.id, f.name, f.food_group AS "group",
               COALESCE(jsonb_agg(jsonb_build_object(
                 'unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit,
                 'purchaseQuantity', pu.purchase_quantity, 'purchaseUnit', pu.purchase_unit,
@@ -667,6 +668,7 @@ export function createApiRouter(): Router {
     const items = [...ingredientTotals.entries()].map(([key, item]) => ({
       foodId: item.foodId,
       name: (foods.get(item.foodId)?.name as string | undefined) ?? 'Alimento desconocido',
+      group: (foods.get(item.foodId)?.group as string | undefined) ?? 'Otros',
       unit: item.unit,
       quantity: sumAmounts(item.quantities),
       purchaseOptions: ((foods.get(item.foodId)?.purchaseUnits ?? []) as { unitName: string; quantity: string; unit: string; purchaseQuantity: string; purchaseUnit: string; isConfirmed: boolean; isApproximate: boolean; roundUp: boolean }[])
@@ -691,7 +693,16 @@ export function createApiRouter(): Router {
         }),
       purchasePending: !((foods.get(item.foodId)?.purchaseUnits ?? []) as { isConfirmed: boolean }[]).some((purchaseUnit) => purchaseUnit.isConfirmed),
     })).sort((left, right) => left.name.localeCompare(right.name, 'es') || left.unit.localeCompare(right.unit, 'es'));
-    response.json({ days: input.days, participantCount: input.peopleCount, peopleCount: input.peopleCount, participants: [{ personId: participant.personId, days: input.days }], usage, items });
+    const menu = usage.map((entry) => ({ day: entry.day, mealTime: entry.mealTime, recipeName: recipes.get(entry.recipeId)!.name as string }));
+    return { days: input.days, participantCount: input.peopleCount, peopleCount: input.peopleCount, personName: person.rows[0].name, participants: [{ personId: participant.personId, days: input.days }], usage, menu, items };
+  }
+
+  router.post('/shopping-list/calculate', async (request, response) => {
+    response.json(await calculateShoppingList(request.body));
+  });
+
+  router.post('/shopping-list/pdf', async (request, response) => {
+    streamShoppingPdf(response, await calculateShoppingList(request.body));
   });
 
   router.post('/exports/pdf', async (request, response) => {

@@ -4,7 +4,7 @@ import { AddRegular, DocumentRegular, PrintRegular, ShoppingBagRegular, WarningR
 import { mealTimes, type Person } from '@foodhelp/contracts';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
-import type { GeneratedShoppingList, RecipeSummary } from '../api/types';
+import type { GeneratedShoppingList, RecipeSummary, ShoppingPlan } from '../api/types';
 import { PageFrame, SectionHeading } from '../components/PageFrame';
 import { useResource } from '../hooks/useResource';
 
@@ -25,6 +25,8 @@ export function ShoppingPage() {
   const [peopleCount, setPeopleCount] = useState('1');
   const [result, setResult] = useState<GeneratedShoppingList | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lastPlan, setLastPlan] = useState<ShoppingPlan | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const availableRecipes = (recipes ?? []).filter((recipe) => recipe.verifiedAt !== null && recipe.personId !== null && recipe.mealTime !== null);
 
@@ -62,7 +64,9 @@ export function ShoppingPage() {
     setBusy(true);
     try {
       const meals = mealTimes.map((mealTime) => ({ mealTime, recipeIds: menuDays.map((day) => day.meals[mealTime]) }));
-      setResult(await api.calculateShopping({ days: menuDays.length, peopleCount: Number(peopleCount), participants: [{ personId, meals }] }));
+      const plan: ShoppingPlan = { days: menuDays.length, peopleCount: Number(peopleCount), participants: [{ personId, meals }] };
+      setResult(await api.calculateShopping(plan));
+      setLastPlan(plan);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'No se pudo calcular la lista de compras.');
     } finally {
@@ -100,7 +104,7 @@ export function ShoppingPage() {
       </form>
       {error && <p className="form-error" role="alert">{error}</p>}
       {result && <section className="content-section shopping-results">
-        <div className="shopping-planner-heading"><SectionHeading detail={`${result.days} días · ${result.peopleCount} personas`}>Lista consolidada</SectionHeading><div className="action-row action-row-start"><Button icon={<PrintRegular />} disabled={!result.items.length} onClick={() => window.print()}>Imprimir</Button><Button icon={<DocumentRegular />} disabled title="PDF de esta lista estará disponible después">PDF</Button></div></div>
+        <div className="shopping-planner-heading"><SectionHeading detail={`${result.days} días · ${result.peopleCount} personas`}>Lista consolidada</SectionHeading><div className="action-row action-row-start"><Button icon={<PrintRegular />} disabled={!result.items.length} onClick={() => window.print()}>Imprimir</Button><Button icon={<DocumentRegular />} disabled={!lastPlan || !result.items.length || pdfBusy} onClick={async () => { if (!lastPlan) return; setPdfBusy(true); setError(null); try { await api.downloadShoppingPdf(lastPlan); } catch (caught) { setError(caught instanceof Error ? caught.message : 'No se pudo generar el PDF.'); } finally { setPdfBusy(false); } }}>{pdfBusy ? 'Generando PDF...' : 'PDF'}</Button></div></div>
         <p className="field-note">Las cantidades incluyen a todos los comensales. Las verduras libres sin medida física se cuentan como porciones de receta.</p>
         {result.items.length ? <Card appearance="outline" className="table-frame"><Table aria-label="Lista de compras calculada"><TableHeader><TableRow><TableHeaderCell>Alimento</TableHeaderCell><TableHeaderCell>Cantidad total</TableHeaderCell><TableHeaderCell>Unidad</TableHeaderCell><TableHeaderCell>Compra</TableHeaderCell></TableRow></TableHeader><TableBody>{result.items.map((item) => <TableRow key={`${item.foodId}-${item.unit}`}><TableCell>{item.name}</TableCell><TableCell>{amountForDisplay(item.quantity)}</TableCell><TableCell>{item.unit}</TableCell><TableCell>{[...item.purchaseOptions.map((option) => `${option.quantity} ${purchaseUnitForDisplay(option.quantity, option.purchaseUnit)}${option.isApproximate ? ' aprox.' : ''} (${amountForDisplay(option.contents)} ${option.unit})`), ...(item.purchasePending ? ['Empaque por confirmar'] : [])].join(' · ') || '—'}</TableCell></TableRow>)}</TableBody></Table></Card> : <Card appearance="outline" className="empty-inline"><ShoppingBagRegular /><strong>La selección no requiere ingredientes medidos</strong><span>Los ingredientes libres sin cantidad física no se pueden sumar a la compra.</span></Card>}
       </section>}

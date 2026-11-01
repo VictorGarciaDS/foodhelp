@@ -94,6 +94,8 @@ h1, h2, p { margin-top: 0; }
 .recipe-row { display: flex; align-items: center; gap: 12px; padding: 13px 16px; border-radius: var(--radius); }
 .recipe-row > svg { color: var(--primary); }
 .recipe-thumbnail { width: 76px; height: 64px; flex: none; object-fit: cover; border-radius: 4px; }
+.food-name-cell { display: inline-flex; align-items: center; gap: 8px; }
+.food-thumbnail { width: 32px; height: 32px; flex: none; object-fit: cover; border-radius: 4px; }
 .recipe-image { display: grid; gap: 6px; margin: 0; }
 .recipe-image img { width: 100%; max-height: 320px; aspect-ratio: 4 / 3; object-fit: cover; border-radius: var(--radius); }
 .recipe-image figcaption { font-size: 12px; color: var(--muted); }
