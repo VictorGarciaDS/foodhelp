@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Button, Card, Field, Input, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from '@fluentui/react-components';
 import { AddRegular, DocumentRegular, PrintRegular, ShoppingBagRegular, WarningRegular } from '@fluentui/react-icons';
-import { mealTimes, type Person } from '@foodhelp/contracts';
+import { canRepeatShoppingMeal, mealTimes, type Person } from '@foodhelp/contracts';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import type { GeneratedShoppingList, RecipeSummary, ShoppingPlan } from '../api/types';
@@ -82,15 +82,15 @@ export function ShoppingPage() {
       <form className="shopping-planner" onSubmit={generateShopping}>
         <section className="content-section">
           <div className="shopping-planner-heading">
-            <SectionHeading detail="Los platillos no se repiten en días consecutivos">Días de menú</SectionHeading>
+            <SectionHeading detail="Almuerzos y comidas distintos en días consecutivos">Días de menú</SectionHeading>
             <Field label="Días por platillo" required><Input type="number" min="1" max="3" step="1" value={String(menuDays.length)} onChange={(_event, value) => resizeMenuDays(Number(value.value))} required /></Field>
             <Field label="Personas a la mesa" required><Input type="number" min="1" max="31" step="1" value={peopleCount} onChange={(_event, value) => { setPeopleCount(value.value); setResult(null); }} required /></Field>
             <Field label="Perfil del menú" required><Select value={personId} onChange={(event) => { setPersonId(event.currentTarget.value); setMenuDays((current) => current.map((day) => ({ ...day, meals: emptyMeals() }))); setResult(null); }} required><option value="" disabled>Seleccionar perfil</option>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
           </div>
           {menuDays.map((day, dayIndex) => <Card appearance="outline" className="shopping-participant" key={day.key}>
-            <div className="shopping-planner-heading"><SectionHeading detail={dayIndex === 0 ? 'Elige un platillo para cada comida' : `No repite la selección del día ${dayIndex}`}>Día {dayIndex + 1}</SectionHeading></div>
+            <div className="shopping-planner-heading"><SectionHeading detail={dayIndex === 0 ? 'Elige un platillo para cada comida' : 'Desayuno y cena pueden repetirse'}>Día {dayIndex + 1}</SectionHeading></div>
             <div className="shopping-meal-grid">{mealTimes.map((mealTime) => {
-              const previousId = dayIndex ? menuDays[dayIndex - 1].meals[mealTime] : '';
+              const previousId = dayIndex && !canRepeatShoppingMeal(mealTime) ? menuDays[dayIndex - 1].meals[mealTime] : '';
               const options = availableRecipes.filter((recipe) => recipe.personId === personId && recipe.mealTime === mealTime && recipe.id !== previousId);
               return <section className="shopping-meal" key={`${day.key}-${mealTime}`}>
                 <Field label={mealTime} required><Select value={day.meals[mealTime]} onChange={(event) => updateMeal(day.key, mealTime, event.currentTarget.value)} required><option value="" disabled>Seleccionar platillo</option>{options.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}</Select></Field>

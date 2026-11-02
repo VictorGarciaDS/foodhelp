@@ -272,6 +272,48 @@ describe('catalog and prescription routes', () => {
     });
   });
 
+  it('counts repeated breakfasts and dinners each day but exports each recipe once', async () => {
+    const personId = '00000000-0000-4000-8000-000000000001';
+    const foodId = '00000000-0000-4000-8000-000000000003';
+    const recipeIds = Array.from({ length: 6 }, (_value, index) => `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`);
+    const mealTimes = ['Desayuno', 'Almuerzo', 'Almuerzo', 'Comida', 'Comida', 'Cena'];
+    const recipes = recipeIds.map((id, index) => ({
+      id, personId, mealTime: mealTimes[index], name: `Recipe ${index}`,
+      instructions: [`Prepare ${index}`], ingredients: [{ foodId, quantity: '1', unit: 'pieza', isFreeConsumption: false }],
+    }));
+    database.query.mockResolvedValueOnce({ rows: [{ name: 'Familia' }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: recipes, rowCount: 6 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: foodId, name: 'Tortilla', purchaseUnits: [] }], rowCount: 1 });
+    const meals = [
+      { mealTime: 'Desayuno', recipeIds: [recipeIds[0], recipeIds[0]] },
+      { mealTime: 'Almuerzo', recipeIds: [recipeIds[1], recipeIds[2]] },
+      { mealTime: 'Comida', recipeIds: [recipeIds[3], recipeIds[4]] },
+      { mealTime: 'Cena', recipeIds: [recipeIds[5], recipeIds[5]] },
+    ];
+    const response = await request('/shopping-list/calculate', 'POST', { days: 2, peopleCount: 2, participants: [{ personId, meals }] });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.usage).toHaveLength(8);
+    expect(result.recipes).toHaveLength(6);
+    expect(result.recipes[0]).toMatchObject({ id: recipeIds[0], instructions: ['Prepare 0'] });
+    expect(result.items[0].quantity).toBe('16');
+  });
+
+  it.each(['Almuerzo', 'Comida'])('rejects consecutive repeats for %s before querying the database', async (mealTime) => {
+    const meals = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((time) => ({
+      mealTime: time,
+      recipeIds: time === mealTime
+        ? ['00000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000010']
+        : ['00000000-0000-4000-8000-000000000010', '00000000-0000-4000-8000-000000000011'],
+    }));
+    const response = await request('/shopping-list/calculate', 'POST', {
+      days: 2, peopleCount: 2, participants: [{ personId: '00000000-0000-4000-8000-000000000001', meals }],
+    });
+    expect(response.ok).toBe(false);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'VALIDATION_ERROR' } });
+    expect(database.query).not.toHaveBeenCalled();
+  });
+
   it('converts twelve walnut pieces to sixty approximate grams for purchase', async () => {
     const personId = '00000000-0000-4000-8000-000000000001';
     const walnutId = '00000000-0000-4000-8000-000000000003';

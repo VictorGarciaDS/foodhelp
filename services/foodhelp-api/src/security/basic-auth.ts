@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { RequestHandler } from 'express';
 import { rateLimit } from 'express-rate-limit';
@@ -19,6 +19,9 @@ export const authLimiter = rateLimit({
 });
 
 export function createBasicAuth(enabled: boolean, username: string, passwordHash: string): RequestHandler {
+  const cacheKey = randomBytes(32);
+  let verifiedFingerprint = '';
+  let verifiedUntil = 0;
   return async (request, response, next) => {
     if (!enabled) return next();
     const encoded = request.header('authorization')?.match(/^Basic\s+([A-Za-z0-9+/=]+)$/i)?.[1];
@@ -27,6 +30,8 @@ export function createBasicAuth(enabled: boolean, username: string, passwordHash
       response.status(401).end();
       return;
     }
+    const fingerprint = createHmac('sha256', cacheKey).update(encoded).digest('hex');
+    if (Date.now() < verifiedUntil && equalStrings(fingerprint, verifiedFingerprint)) return next();
     const credentials = Buffer.from(encoded, 'base64').toString('utf8');
     const separator = credentials.indexOf(':');
     const candidateUser = separator < 0 ? '' : credentials.slice(0, separator);
@@ -38,6 +43,8 @@ export function createBasicAuth(enabled: boolean, username: string, passwordHash
       response.status(401).end();
       return;
     }
+    verifiedFingerprint = fingerprint;
+    verifiedUntil = Date.now() + 5 * 60 * 1000;
     next();
   };
 }

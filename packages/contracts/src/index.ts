@@ -145,10 +145,11 @@ export const recipeDiscoverySchema = z.object({
 }).refine((input) => new Set(input.mainFoodIds).size === input.mainFoodIds.length, {
   path: ['mainFoodIds'], message: 'No repitas ingredientes principales.',
 });
+export const canRepeatShoppingMeal = (mealTime: string): boolean => mealTime === 'Desayuno' || mealTime === 'Cena';
 const shoppingMealSelectionSchema = z.object({
   mealTime: z.enum(mealTimes), recipeIds: z.array(z.string().uuid()).min(1).max(3),
-}).refine((meal) => meal.recipeIds.every((recipeId, index) => index === 0 || recipeId !== meal.recipeIds[index - 1]), {
-  path: ['recipeIds'], message: 'No repitas una receta en días consecutivos.',
+}).refine((meal) => canRepeatShoppingMeal(meal.mealTime) || meal.recipeIds.every((recipeId, index) => index === 0 || recipeId !== meal.recipeIds[index - 1]), {
+  path: ['recipeIds'], message: 'No repitas almuerzos ni comidas en días consecutivos.',
 });
 export const shoppingPlanSchema = z.object({
   days: z.number().int().min(1).max(3),

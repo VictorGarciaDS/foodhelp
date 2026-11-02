@@ -1,5 +1,6 @@
 import PDFDocument from 'pdfkit';
 import type { Response } from 'express';
+import { mealTimes } from '@foodhelp/contracts';
 
 export function streamPdf(response: Response, title: string, rows: string[]): void {
   response.type('application/pdf');
@@ -18,6 +19,7 @@ type ShoppingPdfItem = {
 export type ShoppingPdfData = {
   personName: string; days: number; peopleCount: number;
   menu: { day: number; mealTime: string; recipeName: string }[];
+  recipes: { id: string; name: string; mealTime: string; instructions: string[] }[];
   items: ShoppingPdfItem[];
 };
 
@@ -59,6 +61,36 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
       doc.font('Helvetica').fillColor(colors.text).text(entry.recipeName, left + 92, y, { width: width - 92 });
     }
     doc.moveDown(0.5);
+  }
+
+  doc.moveDown(0.6);
+  ensure(60);
+  doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(13).text('Recetas', left);
+  doc.moveDown(0.4);
+  for (const mealTime of mealTimes) {
+    const recipes = data.recipes.filter((recipe) => recipe.mealTime === mealTime);
+    if (!recipes.length) continue;
+    ensure(60);
+    doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(11).text(mealTime, left);
+    doc.moveDown(0.3);
+    for (const recipe of recipes) {
+      ensure(50);
+      doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(10.5).text(recipe.name, left + 10, doc.y, { width: width - 10 });
+      doc.moveDown(0.3);
+      const instructions = recipe.instructions.map((instruction) => instruction.trim()).filter(Boolean);
+      doc.font('Helvetica').fontSize(10);
+      if (!instructions.length) {
+        doc.fillColor(colors.muted).text('Sin pasos de preparación registrados.', left + 10, doc.y, { width: width - 10 });
+      }
+      for (const [index, instruction] of instructions.entries()) {
+        const step = `${index + 1}. ${instruction}`;
+        const height = doc.heightOfString(step, { width: width - 10 }) + 6;
+        ensure(Math.min(height, doc.page.height - doc.page.margins.top - doc.page.margins.bottom));
+        doc.fillColor(colors.text).text(step, left + 10, doc.y, { width: width - 10 });
+        doc.moveDown(0.3);
+      }
+      doc.moveDown(0.6);
+    }
   }
 
   const columns = [{ x: left + 22, width: 200 }, { x: left + 226, width: 110 }, { x: left + 340, width: width - 340 }];

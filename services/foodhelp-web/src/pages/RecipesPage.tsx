@@ -7,6 +7,7 @@ import type { RecipeDetail, RecipeIngredient, RecipeMatch, RecipeSummary } from 
 import { PageFrame, SectionHeading } from '../components/PageFrame';
 import { useResource } from '../hooks/useResource';
 import { defaultIngredientQuantity, prescriptionAlerts } from '../utils/recipe-portions';
+import { thumbnailUrl } from '../utils/images';
 
 type MainIngredientRow = { key: string; group: FoodGroup | ''; foodId: string };
 
@@ -178,7 +179,7 @@ export function RecipesPage() {
         <div className="recipe-list-heading"><SectionHeading detail={`${recipes.length} propuestas`}>Recetas guardadas</SectionHeading><Button appearance="primary" icon={<AddRegular />} disabled={!people?.length} onClick={startCreating}>Añadir receta</Button></div>
         <div className="recipe-list">{recipes.map((recipe) => (
           <Card appearance="outline" key={recipe.id} className="recipe-row">
-            {recipe.imageUrl && <img className="recipe-thumbnail" src={recipe.imageUrl} alt={recipe.name} loading="lazy" />}
+            {recipe.imageUrl && <img className="recipe-thumbnail" src={thumbnailUrl(recipe.imageUrl)} alt={recipe.name} width={76} height={64} loading="lazy" decoding="async" />}
             <BookmarkRegular aria-hidden="true" />
             <div className="recipe-summary"><strong>{recipe.name}</strong><p>{recipe.personName ?? 'Sin persona asignada'} · {recipe.mealTime ?? 'Sin tiempo asignado'}</p><span className={`status-pill ${recipe.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{recipe.verifiedAt ? 'Verificada' : 'Borrador pendiente de revisión'}</span></div>
             <Button appearance="secondary" icon={<EyeRegular />} onClick={() => setSelectedId(recipe.id)}>Ver detalle</Button>

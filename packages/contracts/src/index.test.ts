@@ -77,6 +77,20 @@ describe('shared request contracts', () => {
     expect(recipeEditSchema.safeParse({ ...recipe, ingredients: [{ foodId: '00000000-0000-4000-8000-000000000001', quantity: '1', unit: 'taza', group: 'Frutas', isFreeConsumption: false }] }).success).toBe(false);
   });
 
+  it('allows consecutive repeats only for breakfast and dinner', () => {
+    const repeatedId = '00000000-0000-4000-8000-000000000002';
+    const otherId = '00000000-0000-4000-8000-000000000003';
+    const meals = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({
+      mealTime, recipeIds: mealTime === 'Desayuno' || mealTime === 'Cena' ? [repeatedId, repeatedId] : [repeatedId, otherId],
+    }));
+    const participant = { personId: '00000000-0000-4000-8000-000000000001', meals };
+    expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 2, participants: [participant] }).success).toBe(true);
+    for (const mealTime of ['Almuerzo', 'Comida']) {
+      const invalid = { ...participant, meals: meals.map((meal) => meal.mealTime === mealTime ? { ...meal, recipeIds: [repeatedId, repeatedId] } : meal) };
+      expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 2, participants: [invalid] }).success).toBe(false);
+    }
+  });
+
   it('allows measured grocery quantities for free vegetables without making them portioned', () => {
     const ingredient = { foodId: '00000000-0000-4000-8000-000000000001', quantity: '2', unit: 'tazas', group: 'Verduras', isFreeConsumption: true };
     const recipe = { personId: '00000000-0000-4000-8000-000000000002', name: 'Ensalada', mealTime: 'Comida', sourceText: 'Ensalada al gusto', reviewNotes: [], instructions: ['Mezclar'], ingredients: [ingredient], verify: false };

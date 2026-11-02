@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import {
-  calculateEquivalentSchema, createFoodSchema, createPersonSchema, foodPurchaseUnitsSchema, generateMenuRequestSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema,
+  calculateEquivalentSchema, canRepeatShoppingMeal, createFoodSchema, createPersonSchema, foodPurchaseUnitsSchema, generateMenuRequestSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema,
   idPathSchema, inheritRecipesSchema, pdfRequestSchema, personPathSchema, prescriptionPathSchema, prescriptionSchema, shoppingListQuerySchema,
   suggestionsRequestSchema, weekPathSchema,
 } from '@foodhelp/contracts';
@@ -615,7 +615,7 @@ export function createApiRouter(): Router {
 
     const recipeIds = [...new Set(participant.meals.flatMap((meal) => meal.recipeIds))];
     const recipeResult = await getPool().query(
-      `SELECT id, name, person_id AS "personId", meal_time AS "mealTime", ingredients
+      `SELECT id, name, person_id AS "personId", meal_time AS "mealTime", ingredients, instructions
        FROM foodhelp.recipes WHERE id = ANY($1::uuid[]) AND verified_at IS NOT NULL`, [recipeIds],
     );
     const recipes = new Map(recipeResult.rows.map((recipe) => [recipe.id as string, recipe]));
@@ -625,7 +625,7 @@ export function createApiRouter(): Router {
     for (let day = 0; day < input.days; day += 1) {
       for (const meal of participant.meals) {
         const recipeId = meal.recipeIds[day];
-        if (day > 0 && recipeId === meal.recipeIds[day - 1]) throw new ApiError(422, 'VALIDATION_ERROR', 'Elige una receta distinta a la del día anterior para variar el menú.');
+        if (!canRepeatShoppingMeal(meal.mealTime) && day > 0 && recipeId === meal.recipeIds[day - 1]) throw new ApiError(422, 'VALIDATION_ERROR', 'Elige un almuerzo o comida distinto al del día anterior.');
         const recipe = recipes.get(recipeId);
         if (!recipe) throw new ApiError(409, 'MENU_BLOCKED', 'Todas las recetas deben tener ingredientes completos y verificados antes de calcular compras.');
         if (recipe.personId !== participant.personId || recipe.mealTime !== meal.mealTime) {
@@ -694,7 +694,11 @@ export function createApiRouter(): Router {
       purchasePending: !((foods.get(item.foodId)?.purchaseUnits ?? []) as { isConfirmed: boolean }[]).some((purchaseUnit) => purchaseUnit.isConfirmed),
     })).sort((left, right) => left.name.localeCompare(right.name, 'es') || left.unit.localeCompare(right.unit, 'es'));
     const menu = usage.map((entry) => ({ day: entry.day, mealTime: entry.mealTime, recipeName: recipes.get(entry.recipeId)!.name as string }));
-    return { days: input.days, participantCount: input.peopleCount, peopleCount: input.peopleCount, personName: person.rows[0].name, participants: [{ personId: participant.personId, days: input.days }], usage, menu, items };
+    const selectedRecipes = recipeIds.map((id) => {
+      const recipe = recipes.get(id)!;
+      return { id, name: recipe.name as string, mealTime: recipe.mealTime as string, instructions: (recipe.instructions ?? []) as string[] };
+    });
+    return { days: input.days, participantCount: input.peopleCount, peopleCount: input.peopleCount, personName: person.rows[0].name, participants: [{ personId: participant.personId, days: input.days }], usage, menu, recipes: selectedRecipes, items };
   }
 
   router.post('/shopping-list/calculate', async (request, response) => {
