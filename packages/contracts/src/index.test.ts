@@ -62,6 +62,10 @@ describe('shared request contracts', () => {
       meals: ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime, recipeIds: ['00000000-0000-4000-8000-000000000002', '00000000-0000-4000-8000-000000000003'] })),
     };
     expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 3, participants: [participant] }).success).toBe(true);
+    expect(shoppingPlanSchema.parse({ days: 2, peopleCount: 3, participants: [participant] }).daysPerDish).toBe(1);
+    expect(shoppingPlanSchema.safeParse({ days: 2, daysPerDish: 2, peopleCount: 3, participants: [participant] }).success).toBe(true);
+    expect(shoppingPlanSchema.safeParse({ days: 2, daysPerDish: 0, peopleCount: 3, participants: [participant] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 2, daysPerDish: 4, peopleCount: 3, participants: [participant] }).success).toBe(false);
     expect(shoppingPlanSchema.safeParse({ days: 4, peopleCount: 3, participants: [participant] }).success).toBe(false);
     expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 0, participants: [participant] }).success).toBe(false);
     expect(shoppingPlanSchema.safeParse({ days: 2, peopleCount: 3, participants: [participant, participant] }).success).toBe(false);

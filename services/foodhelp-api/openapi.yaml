@@ -138,11 +138,19 @@ paths:
         '422': { description: Personas no válidas }
   /shopping-list/calculate:
     post:
+      description: days indica menus distintos (1 a 3); daysPerDish indica cuantos dias se come cada menu (1 a 3, por defecto 1). Cada ingrediente se multiplica por peopleCount y daysPerDish antes de sumar. La respuesta days es days por daysPerDish.
       responses:
-        '200': { description: Lista exacta consolidada por comida, persona y duración individual }
+        '200': { description: Lista exacta consolidada con dias totales, menuCount, daysPerDish y conversiones de compra compatibles }
         '404': { description: Persona seleccionada no encontrada }
         '409': { description: Receta no verificada o pendiente }
         '422': { description: Falta seleccionar receta en algún tiempo de comida }
+  /shopping-list/pdf:
+    post:
+      description: Acepta el mismo plan que shopping-list/calculate. Expande el calendario segun daysPerDish e incluye los pasos guardados una vez por receta, agrupados por tiempo de comida.
+      responses:
+        '200': { description: PDF con Menu, Recetas y Lista }
+        '409': { description: Receta no verificada o pendiente }
+        '422': { description: Plan no valido }
   /exports/pdf:
     post:
       responses:

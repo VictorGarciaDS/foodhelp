@@ -6,6 +6,14 @@ import { describe, expect, it } from 'vitest';
 const schema = readFileSync(resolve(__dirname, '0001_foodhelp_schema.sql'), 'utf8');
 
 describe('foodhelp schema migration', () => {
+  it('records confirmed packages and explicitly approved cooking yields without guessing protein scoop weights', () => {
+    const migration = readFileSync(resolve(__dirname, '0012_confirmed_household_purchase_units.sql'), 'utf8');
+    expect(migration).toContain("'cajas de 1 L', '4', 'tazas'");
+    expect(migration).toContain("'bolsas de 16 rebanadas', '16', 'rebanadas'");
+    expect(migration).toContain("('Pasta cocida', '2')");
+    expect(migration).toContain("'tazas crudas', true, true, false");
+    expect(migration).not.toContain('Habits');
+  });
   it('stores the seven supplied recipes as unverified drafts with review notes', () => {
     const migration = readFileSync(resolve(__dirname, '0005_recipe_drafts.sql'), 'utf8');
     expect(migration.match(/ARRAY\['/g)).toHaveLength(7);

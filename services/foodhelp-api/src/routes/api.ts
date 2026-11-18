@@ -619,6 +619,8 @@ export function createApiRouter(): Router {
        FROM foodhelp.recipes WHERE id = ANY($1::uuid[]) AND verified_at IS NOT NULL`, [recipeIds],
     );
     const recipes = new Map(recipeResult.rows.map((recipe) => [recipe.id as string, recipe]));
+    const daysPerDish = input.daysPerDish ?? 1;
+    const servings = input.peopleCount * daysPerDish;
     const ingredientTotals = new Map<string, { foodId: string; quantities: string[]; unit: string }>();
     const usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[] = [];
 
@@ -637,7 +639,7 @@ export function createApiRouter(): Router {
             if (ingredient.isFreeConsumption && ingredient.group === 'Verduras') {
               const key = `${ingredient.foodId}\u0000porciones`;
               const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: 'porciones' };
-              item.quantities.push(String(input.peopleCount));
+              item.quantities.push(String(servings));
               ingredientTotals.set(key, item);
             }
             continue;
@@ -646,7 +648,7 @@ export function createApiRouter(): Router {
           const unit = canonicalUnit(ingredient.unit);
           const key = `${ingredient.foodId}\u0000${unit}`;
           const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit };
-          item.quantities.push(multiplyAmount(ingredient.quantity, input.peopleCount));
+          item.quantities.push(multiplyAmount(ingredient.quantity, servings));
           ingredientTotals.set(key, item);
         }
       }
@@ -691,14 +693,19 @@ export function createApiRouter(): Router {
             isApproximate: purchaseUnit.isApproximate,
           };
         }),
-      purchasePending: !((foods.get(item.foodId)?.purchaseUnits ?? []) as { isConfirmed: boolean }[]).some((purchaseUnit) => purchaseUnit.isConfirmed),
+      purchasePending: !((foods.get(item.foodId)?.purchaseUnits ?? []) as { isConfirmed: boolean; unit: string }[])
+        .some((purchaseUnit) => purchaseUnit.isConfirmed && canonicalUnit(purchaseUnit.unit) === item.unit),
     })).sort((left, right) => left.name.localeCompare(right.name, 'es') || left.unit.localeCompare(right.unit, 'es'));
-    const menu = usage.map((entry) => ({ day: entry.day, mealTime: entry.mealTime, recipeName: recipes.get(entry.recipeId)!.name as string }));
+    const menu = usage.flatMap((entry) => Array.from({ length: daysPerDish }, (_value, offset) => ({
+      day: (entry.day - 1) * daysPerDish + offset + 1,
+      mealTime: entry.mealTime, recipeName: recipes.get(entry.recipeId)!.name as string,
+    })));
     const selectedRecipes = recipeIds.map((id) => {
       const recipe = recipes.get(id)!;
       return { id, name: recipe.name as string, mealTime: recipe.mealTime as string, instructions: (recipe.instructions ?? []) as string[] };
     });
-    return { days: input.days, participantCount: input.peopleCount, peopleCount: input.peopleCount, personName: person.rows[0].name, participants: [{ personId: participant.personId, days: input.days }], usage, menu, recipes: selectedRecipes, items };
+    const totalDays = input.days * daysPerDish;
+    return { days: totalDays, menuCount: input.days, daysPerDish, participantCount: input.peopleCount, peopleCount: input.peopleCount, personName: person.rows[0].name, participants: [{ personId: participant.personId, days: totalDays }], usage, menu, recipes: selectedRecipes, items };
   }
 
   router.post('/shopping-list/calculate', async (request, response) => {

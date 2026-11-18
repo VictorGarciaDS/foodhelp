@@ -272,7 +272,7 @@ describe('catalog and prescription routes', () => {
     });
   });
 
-  it('counts repeated breakfasts and dinners each day but exports each recipe once', async () => {
+  it.each([1, 2, 3])('scales two menus by people and %s days per dish, exporting each recipe once', async (daysPerDish) => {
     const personId = '00000000-0000-4000-8000-000000000001';
     const foodId = '00000000-0000-4000-8000-000000000003';
     const recipeIds = Array.from({ length: 6 }, (_value, index) => `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`);
@@ -290,13 +290,16 @@ describe('catalog and prescription routes', () => {
       { mealTime: 'Comida', recipeIds: [recipeIds[3], recipeIds[4]] },
       { mealTime: 'Cena', recipeIds: [recipeIds[5], recipeIds[5]] },
     ];
-    const response = await request('/shopping-list/calculate', 'POST', { days: 2, peopleCount: 2, participants: [{ personId, meals }] });
+    const response = await request('/shopping-list/calculate', 'POST', { days: 2, daysPerDish, peopleCount: 2, participants: [{ personId, meals }] });
     expect(response.status).toBe(200);
     const result = await response.json();
     expect(result.usage).toHaveLength(8);
     expect(result.recipes).toHaveLength(6);
     expect(result.recipes[0]).toMatchObject({ id: recipeIds[0], instructions: ['Prepare 0'] });
-    expect(result.items[0].quantity).toBe('16');
+    expect(result.items[0].quantity).toBe(String(16 * daysPerDish));
+    expect(result.days).toBe(2 * daysPerDish);
+    expect(result.menu).toHaveLength(8 * daysPerDish);
+    expect(result.menu.filter((entry: { day: number }) => entry.day === 1)).toHaveLength(4);
   });
 
   it.each(['Almuerzo', 'Comida'])('rejects consecutive repeats for %s before querying the database', async (mealTime) => {
@@ -344,12 +347,12 @@ describe('catalog and prescription routes', () => {
         { foodId: vegetableId, quantity: null, unit: null, isFreeConsumption: true, group: 'Verduras' },
       ],
     }))), rowCount: 12 });
-    database.query.mockResolvedValueOnce({ rows: [{ id: vegetableId, name: 'Espinaca', purchaseUnits: [] }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: vegetableId, name: 'Espinaca', purchaseUnits: [{ isConfirmed: true, unit: 'g', purchaseUnit: 'kg' }] }], rowCount: 1 });
     const meals = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime, index) => ({ mealTime, recipeIds: recipeIds.slice(index * 3, index * 3 + 3) }));
     const response = await request('/shopping-list/calculate', 'POST', { days: 3, peopleCount: 2, participants: [{ personId, meals }] });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      items: [{ foodId: vegetableId, name: 'Espinaca', quantity: '24', unit: 'porciones' }],
+      items: [{ foodId: vegetableId, name: 'Espinaca', quantity: '24', unit: 'porciones', purchasePending: true }],
     });
   });
 

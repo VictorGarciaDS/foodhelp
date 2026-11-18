@@ -153,6 +153,7 @@ const shoppingMealSelectionSchema = z.object({
 });
 export const shoppingPlanSchema = z.object({
   days: z.number().int().min(1).max(3),
+  daysPerDish: z.number().int().min(1).max(3).default(1),
   peopleCount: z.number().int().min(1).max(31),
   participants: z.array(z.object({ personId: z.string().uuid(), meals: z.array(shoppingMealSelectionSchema).length(4) })).length(1),
 }).superRefine((plan, context) => {
