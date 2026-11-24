@@ -1,8 +1,25 @@
-import { equivalentFraction, multiplyAmounts, rationallyEqual } from '../equivalents/exact';
+import { equivalentFraction, multiplyAmounts, rationallyEqual, sumAmounts } from '../equivalents/exact';
 
 export type PrescriptionRow = { group: string; equivalents: string; requirementKind: string };
 export type InheritedIngredient = { foodId: string; quantity: string | null; unit: string | null; group: string; isFreeConsumption: boolean };
 export type InheritanceMode = 'identical' | 'proportional' | 'different';
+
+export function prescriptionFromIngredients(ingredients: InheritedIngredient[], foods: Map<string, { baseQuantity: string | null }>): PrescriptionRow[] {
+  const quantities = new Map<string, string[]>();
+  const rows: PrescriptionRow[] = [];
+  for (const ingredient of ingredients) {
+    if (ingredient.isFreeConsumption) {
+      if (ingredient.group === 'Verduras' && !rows.some((row) => row.group === 'Verduras')) rows.push({ group: 'Verduras', equivalents: '1', requirementKind: 'free_guidance' });
+      continue;
+    }
+    const baseQuantity = foods.get(ingredient.foodId)?.baseQuantity;
+    if (!baseQuantity || !ingredient.quantity) throw new Error('La receta base contiene una porcion sin confirmar.');
+    const value = equivalentFraction(ingredient.quantity, baseQuantity);
+    const amount = value.denominator === '1' ? value.numerator : `${value.numerator}/${value.denominator}`;
+    quantities.set(ingredient.group, [...(quantities.get(ingredient.group) ?? []), amount]);
+  }
+  return [...rows, ...[...quantities].map(([group, amounts]) => ({ group, equivalents: sumAmounts(amounts), requirementKind: 'exact' }))];
+}
 
 const groupLabel = (group: string) => ({ Proteinas: 'Proteínas', Azucar: 'Azúcar', Lacteos: 'Lácteos' }[group] ?? group);
 

@@ -37,11 +37,20 @@ function preparationFor(recipe, foods) {
   }
   if (/chiles tipo en nogada/.test(name)) {
     source = reference('poblano-peppers-in-walnut-sauce');
-    steps.push(`Asar ${take(/^chile poblano/)}, cubrir 10 minutos, pelar y abrir a lo largo para retirar venas y semillas, conservando el chile entero.`);
+    steps.push(`Desflemar y pelar ${take(/^chile poblano/)}: asar por todos sus lados, cubrir 10 minutos, retirar la piel y abrir a lo largo para quitar venas y semillas; remojar brevemente en agua caliente y escurrir.`);
     steps.push(`Cocinar ${take(/^carne molida/)} en sarten antiadherente con ${take(/^(jitomate|cebolla)/)} picados y un poco de agua, sin aceite adicional, hasta que la carne alcance 71 C.`);
-    steps.push(`Pelar y picar ${take(/^(manzana|pera|durazno)/)}; agregar al picadillo cocido y calentar de 2 a 3 minutos para conservar su forma.`);
-    steps.push(`Licuar ${take(/^nueces/)} con ${take(/^queso cottage/)} y agua suficiente para formar una salsa cremosa; no agregar leche, azucar, crema ni otros ingredientes.`);
+    const fruit = take(/^(manzana|pera|durazno|platano)/);
+    const raisins = take(/pasas/);
+    steps.push(`Pelar y picar ${fruit}; agregar al picadillo cocido${raisins ? ` con ${raisins}` : ''} y calentar de 2 a 3 minutos para conservar su forma.`);
+    const dairy = take(/^(queso cottage|leche)/);
+    steps.push(`Licuar ${take(/^nueces/)} con ${dairy} y agua suficiente para formar una salsa cremosa; no agregar azucar, crema ni otros ingredientes.`);
     steps.push('Rellenar el chile con el picadillo de fruta, banar con la salsa de nuez y servir sin capear. Esta adaptacion conserva fruta en el relleno; sigue pendiente de autorizacion nutricional para Comida.');
+  } else if (/^taco de salmon y crema de verduras/.test(name)) {
+    source = reference('easy-fish-fillets-dinner');
+    fish();
+    steps.push(`Lavar ${take(/^espinaca/)} y cocinar con un poco de agua y parte del aceite medido; servir junto al salmon, sin licuar en la crema.`);
+    steps.push(`Pelar y cortar ${take(/^(calabaza|calabacita|zanahoria|papa)/)}; cocer en agua hasta ablandar, licuar con su agua de coccion y calentar sin agregar leche ni harina.`);
+    steps.push(`Calentar ${take(/^salchicha/)} siguiendo su etiqueta; repartir la proteina en ${take(/^tortillas/)} calientes y servir con las espinacas y la crema.`);
   } else if (/^alambre/.test(name)) {
     source = reference('tacos-de-alambre-recipe');
     const meat = take(/^(pechuga de pollo|bistec de res)$/);

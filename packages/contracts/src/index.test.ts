@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { calculateEquivalentSchema, createFoodSchema, foodPurchaseUnitsSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema } from './index';
+import { calculateEquivalentSchema, createFoodSchema, foodPurchaseUnitsSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema, withZeroColacion } from './index';
 
 describe('shared request contracts', () => {
+  it('adds seven zero snack groups without replacing existing values', () => {
+    const rows = withZeroColacion([{ mealTime: 'Colacion', group: 'Frutas', equivalents: '1' }]);
+    expect(rows).toHaveLength(7);
+    expect(rows.find((row) => row.group === 'Frutas')?.equivalents).toBe('1');
+    expect(withZeroColacion(rows)).toEqual(rows);
+  });
+  it('supports independent base recipes and local image paths', () => {
+    expect(recipeEditSchema.safeParse({ personId: null, name: 'Base', mealTime: 'Colacion', imageUrl: '/images/recipes/base.jpg', sourceText: 'Base', reviewNotes: [], instructions: ['Servir'], ingredients: [], verify: false }).success).toBe(true);
+  });
   it('keeps the Ades portion pending rather than treating it as free or verified', () => {
     const ades = { name: 'Leche Ades sin azúcar', group: 'Lacteos', baseQuantity: null, unit: null, isFreeConsumption: false, portionPending: true, verified: false };
     expect(createFoodSchema.safeParse(ades).success).toBe(true);

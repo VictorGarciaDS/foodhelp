@@ -6,6 +6,15 @@ import { describe, expect, it } from 'vitest';
 const schema = readFileSync(resolve(__dirname, '0001_foodhelp_schema.sql'), 'utf8');
 
 describe('foodhelp schema migration', () => {
+  it('adds cotija and zero snack rows while retaining independently linked profile recipes', () => {
+    const foodMigration = readFileSync(resolve(__dirname, '0014_cotija_and_colacion.sql'), 'utf8');
+    expect(foodMigration).toContain("'Queso cotija', 'Proteinas', '35', 'g', false");
+    expect(foodMigration).toContain("'Colacion', groups.food_group, 0");
+    const bases = readFileSync(resolve(__dirname, '0015_independent_recipe_bases.sql'), 'utf8');
+    expect(bases).toContain('base_id, NULL, name');
+    expect(bases).toContain('SET inherited_from_recipe_id = originals.base_id');
+    expect(bases).not.toContain('DELETE FROM');
+  });
   it('records confirmed packages and explicitly approved cooking yields without guessing protein scoop weights', () => {
     const migration = readFileSync(resolve(__dirname, '0012_confirmed_household_purchase_units.sql'), 'utf8');
     expect(migration).toContain("'cajas de 1 L', '4', 'tazas'");

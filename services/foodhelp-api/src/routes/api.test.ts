@@ -40,6 +40,27 @@ describe('catalog and prescription routes', () => {
     return request('/equivalents/calculate', 'POST', { foodId: '00000000-0000-4000-8000-000000000001', quantity: '2', unit });
   }
 
+  it('copies an independent base proportionally and verifies it against the target prescription', async () => {
+    const personId = '00000000-0000-4000-8000-000000000001';
+    const foodId = '00000000-0000-4000-8000-000000000002';
+    const recipeId = '00000000-0000-4000-8000-000000000003';
+    const ingredient = { foodId, quantity: '30', unit: 'g', group: 'Proteinas', isFreeConsumption: false };
+    const catalogFood = { id: foodId, group: 'Proteinas', baseQuantity: '30', unit: 'g', isFreeConsumption: false, portionPending: false, verifiedAt: '2026-10-05T12:00:00Z' };
+    database.query.mockResolvedValueOnce({ rows: [{ id: personId }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [{ mealTime: 'Comida', group: 'Proteinas', equivalents: '2', requirementKind: 'exact' }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: recipeId, name: 'Base', mealTime: 'Comida', sourceText: 'Base', reviewNotes: [], instructions: ['Cocinar'], ingredients: [ingredient], verifiedAt: '2026-10-05T12:00:00Z' }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [catalogFood], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: personId }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [catalogFood], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [{ group: 'Proteinas', equivalents: '2', requirementKind: 'exact' }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    const response = await request(`/people/${personId}/inherit-recipes`, 'POST', { basePersonId: null });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ inheritance: { copied: 1, proportional: 1, verified: 1 } });
+    expect(JSON.parse(database.query.mock.calls[7][1][6])).toEqual([{ ...ingredient, quantity: '60' }]);
+    expect(database.query.mock.calls[7][1][11]).toBe(recipeId);
+  });
+
   it('loads complete monthly prescriptions for the selected person', async () => {
     const records = [{ id: '00000000-0000-4000-8000-000000000002', month: '2026-10', meals: [{ mealTime: 'Comida', group: 'Proteinas', equivalents: '5' }] }];
     database.query.mockResolvedValueOnce({ rows: [{ id: '00000000-0000-4000-8000-000000000001' }], rowCount: 1 });
@@ -60,9 +81,10 @@ describe('catalog and prescription routes', () => {
     });
     expect(response.status).toBe(200);
     const insertCalls = database.transactionQuery.mock.calls.filter(([sql]) => sql.includes('INSERT INTO foodhelp.prescription_items'));
-    expect(insertCalls).toHaveLength(2);
+    expect(insertCalls).toHaveLength(9);
     expect(insertCalls[0][1]).toEqual([preferredFoodId, 'Desayuno', 'Lacteos', '1', 'exact', preferredFoodId, null]);
     expect(insertCalls[1][1]).toEqual([preferredFoodId, 'Comida', 'Verduras', '2', 'free_guidance', null, 'Libre']);
+    expect(insertCalls.slice(2).every((call) => call[1][1] === 'Colacion' && call[1][3] === '0')).toBe(true);
     expect(database.transactionQuery).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO foodhelp.prescriptions'), expect.arrayContaining(['2026-10-02']));
     expect(database.transactionQuery).toHaveBeenCalledWith('COMMIT');
     expect(database.release).toHaveBeenCalledOnce();
@@ -149,6 +171,22 @@ describe('catalog and prescription routes', () => {
     const body = await response.json();
     expect(body.recipe.verifiedAt).toBeNull();
     expect(database.query.mock.calls[3][1][5]).toBe(JSON.stringify([{ foodId, quantity: '1', unit: 'pieza', group: 'Cereales y leguminosas', isFreeConsumption: false }]));
+  });
+
+  it.each([undefined, '/images/recipes/mole.jpg', 'https://example.com/mole.jpg', null])('preserves omitted images and accepts explicit image changes for base recipes: %s', async (imageUrl) => {
+    const recipeId = '00000000-0000-4000-8000-000000000003';
+    const foodId = '00000000-0000-4000-8000-000000000002';
+    database.query.mockResolvedValueOnce({ rows: [{ personId: null, imageUrl: '/images/recipes/original.jpg' }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: foodId, group: 'Cereales y leguminosas', baseQuantity: '1', unit: 'piezas', isFreeConsumption: false, portionPending: false, verifiedAt: '2026-10-05T12:00:00Z' }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: recipeId }], rowCount: 1 });
+    const ingredient = { foodId, quantity: '1', unit: 'piezas', group: 'Cereales y leguminosas', isFreeConsumption: false };
+    const response = await request(`/recipes/${recipeId}`, 'PUT', {
+      personId: null, name: 'Base', mealTime: 'Comida', imageUrl, sourceText: 'Base', reviewNotes: [], instructions: ['Servir'], ingredients: [ingredient, ingredient], verify: true,
+    });
+    expect(response.status).toBe(200);
+    const values = database.query.mock.calls[2][1];
+    expect(JSON.parse(values[5])).toEqual([{ ...ingredient, quantity: '2' }]);
+    expect(values[9]).toBe(imageUrl === undefined ? '/images/recipes/original.jpg' : imageUrl);
   });
 
   it('manually creates a recipe using the same exact prescription verification', async () => {

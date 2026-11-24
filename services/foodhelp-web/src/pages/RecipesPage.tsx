@@ -13,6 +13,7 @@ type MainIngredientRow = { key: string; group: FoodGroup | ''; foodId: string };
 
 export function RecipesPage() {
   const [retryKey, setRetryKey] = useState(0);
+  const [recipeOwner, setRecipeOwner] = useState('base');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editor, setEditor] = useState<RecipeEdit | null>(null);
   const [creating, setCreating] = useState(false);
@@ -30,7 +31,7 @@ export function RecipesPage() {
   const { data, busy, error } = useResource<RecipeSummary[]>(() => api.listRecipes(), retryKey);
   const { data: foods } = useResource<Food[]>(() => api.listFoods(), 0);
   const { data: people } = useResource<Person[]>(() => api.listPeople(), 0);
-  const recipes = data ?? [];
+  const recipes = (data ?? []).filter((recipe) => recipeOwner === 'base' ? recipe.personId === null : recipe.personId === recipeOwner);
   const activeDiscoveryPerson = people?.find((person) => person.id === discoveryPersonId) ?? people?.[0];
   const pageState = error ? 'error' : busy ? 'loading' : 'data';
   const { data: detail, busy: detailBusy, error: detailError, reload: reloadDetail } = useResource<RecipeDetail | null>(() => selectedId ? api.getRecipe(selectedId) : Promise.resolve(null), `${selectedId ?? ''}:${retryKey}`);
@@ -48,7 +49,7 @@ export function RecipesPage() {
   const mainFoodIds = mainIngredients.map((ingredient) => ingredient.foodId).filter(Boolean);
   const mainIngredientsComplete = mainIngredients.length > 0 && mainIngredients.every((ingredient) => ingredient.group && ingredient.foodId)
     && new Set(mainFoodIds).size === mainFoodIds.length;
-  const canVerify = Boolean(editor && prescriptionReady && prescribedMeals.length && portionAlerts.length === 0
+  const canVerify = Boolean(editor && (editor.personId === null || (prescriptionReady && prescribedMeals.length)) && portionAlerts.length === 0
     && missingGroups.length === 0 && editor.reviewNotes.length === 0 && editor.ingredients.length > 0
     && editor.instructions.length > 0 && editor.instructions.every((instruction) => instruction.trim().length > 0));
 
@@ -56,13 +57,16 @@ export function RecipesPage() {
     setCreating(false);
     setEditorError(null);
     setEditor({
-      personId: recipe.personId ?? people?.[0]?.id ?? '',
+      personId: recipe.personId,
       name: recipe.name,
       mealTime: (mealTimes as readonly string[]).includes(recipe.mealTime ?? '') ? recipe.mealTime as RecipeEdit['mealTime'] : 'Desayuno',
       sourceText: recipe.sourceText ?? '',
       reviewNotes: recipe.reviewNotes ?? [],
       instructions: recipe.instructions ?? [],
-      ingredients: recipe.ingredients ?? [],
+      ingredients: (recipe.ingredients ?? []).map((ingredient) => ({
+        ...ingredient,
+        unit: ingredient.isFreeConsumption ? ingredient.unit : foods?.find((food) => food.id === ingredient.foodId)?.unit ?? ingredient.unit,
+      })),
       imageUrl: recipe.imageUrl,
       imageAttribution: recipe.imageAttribution,
       imageLicense: recipe.imageLicense,
@@ -71,8 +75,7 @@ export function RecipesPage() {
   }
 
   function startCreating() {
-    const personId = people?.[0]?.id;
-    if (!personId) return;
+    const personId = recipeOwner === 'base' ? null : recipeOwner;
     setEditorError(null);
     setSelectedId(null);
     setCreating(true);
@@ -169,19 +172,20 @@ export function RecipesPage() {
       title="Recetas"
       subtitle="Recetas guardadas primero · detalle bajo demanda"
       state={pageState}
-      hasData={recipes.length > 0}
+      hasData={(data ?? []).length > 0}
       error={error}
       onRetry={() => setRetryKey((value) => value + 1)}
       emptyTitle="Todavía no hay recetas guardadas"
       emptyText="Todavía no se han registrado propuestas familiares."
     >
       <section className="content-section">
+        <Field label="Recetas del perfil"><Select value={recipeOwner} onChange={(event) => { setRecipeOwner(event.currentTarget.value); setSelectedId(null); }}><option value="base">Recetas base</option>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
         <div className="recipe-list-heading"><SectionHeading detail={`${recipes.length} propuestas`}>Recetas guardadas</SectionHeading><Button appearance="primary" icon={<AddRegular />} disabled={!people?.length} onClick={startCreating}>Añadir receta</Button></div>
         <div className="recipe-list">{recipes.map((recipe) => (
           <Card appearance="outline" key={recipe.id} className="recipe-row">
             {recipe.imageUrl && <img className="recipe-thumbnail" src={thumbnailUrl(recipe.imageUrl)} alt={recipe.name} width={76} height={64} loading="lazy" decoding="async" />}
             <BookmarkRegular aria-hidden="true" />
-            <div className="recipe-summary"><strong>{recipe.name}</strong><p>{recipe.personName ?? 'Sin persona asignada'} · {recipe.mealTime ?? 'Sin tiempo asignado'}</p><span className={`status-pill ${recipe.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{recipe.verifiedAt ? 'Verificada' : 'Borrador pendiente de revisión'}</span></div>
+            <div className="recipe-summary"><strong>{recipe.name}</strong><p>{recipe.personName ?? 'Recetas base'} · {recipe.mealTime ?? 'Sin tiempo asignado'}</p><span className={`status-pill ${recipe.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{recipe.verifiedAt ? 'Verificada' : 'Borrador pendiente de revisión'}</span></div>
             <Button appearance="secondary" icon={<EyeRegular />} onClick={() => setSelectedId(recipe.id)}>Ver detalle</Button>
           </Card>
         ))}</div>
@@ -218,10 +222,10 @@ export function RecipesPage() {
             {editor ? (
               <form id="recipe-editor" className="recipe-editor" onSubmit={saveEditor}>
                 <Field label="Nombre" required><Input required maxLength={160} value={editor.name} onChange={(_event, value) => setEditor({ ...editor, name: value.value, verify: false })} /></Field>
-                <Field label="Persona" required><Select value={editor.personId} onChange={(event) => setEditor({ ...editor, personId: event.currentTarget.value, verify: false })}>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
+                <Field label="Perfil"><Select value={editor.personId ?? ''} onChange={(event) => setEditor({ ...editor, personId: event.currentTarget.value || null, verify: false })}><option value="">Recetas base</option>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
                 <Field label="Tiempo de comida" required><Select value={editor.mealTime} onChange={(event) => setEditor({ ...editor, mealTime: event.currentTarget.value as RecipeEdit['mealTime'], verify: false })}>{mealTimes.map((mealTime) => <option key={mealTime}>{mealTime}</option>)}</Select></Field>
                 <Field label="Propuesta original" required><Textarea required resize="vertical" value={editor.sourceText} onChange={(_event, value) => setEditor({ ...editor, sourceText: value.value, verify: false })} /></Field>
-                <Field label="URL de imagen"><Input type="url" value={editor.imageUrl ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageUrl: value.value || null, verify: false })} placeholder="https://upload.wikimedia.org/..." /></Field>
+                <Field label="URL de imagen"><Input inputMode="url" value={editor.imageUrl ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageUrl: value.value || null, verify: false })} placeholder="/images/recipes/... o https://..." /></Field>
                 <Field label="Fuente / autor de imagen"><Input type="url" value={editor.imageAttribution ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageAttribution: value.value || null, verify: false })} placeholder="https://commons.wikimedia.org/wiki/File:..." /></Field>
                 <Field label="Licencia / crédito"><Input value={editor.imageLicense ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageLicense: value.value || null, verify: false })} placeholder="Autor · CC BY 4.0" /></Field>
                 <Field label="Pendientes de revisión"><Textarea resize="vertical" placeholder="Una nota pendiente por línea; deja vacío para confirmar que se resolvieron." value={editor.reviewNotes.join('\n')} onChange={(_event, value) => setEditor({ ...editor, reviewNotes: value.value.split('\n').map((note) => note.trim()).filter(Boolean), verify: false })} /></Field>
@@ -233,6 +237,7 @@ export function RecipesPage() {
                     <div className="recipe-ingredient-row" key={`${index}-${ingredient.foodId}`}>
                       <Field label={`Tipo de alimento ${index + 1}`} required><Select value={ingredient.group} onChange={(event) => selectFoodGroup(index, event.currentTarget.value as FoodGroup)}>{foodGroups.map((group) => <option key={group} value={group}>{group === 'Proteinas' ? 'Proteínas' : group === 'Azucar' ? 'Azúcar' : group === 'Lacteos' ? 'Lácteos' : group}</option>)}</Select></Field>
                       <Field label={`Alimento ${index + 1}`} required><Select disabled={prescriptionsBusy || !!prescriptionsError || (!!currentPrescription && !prescriptionReady)} value={ingredient.foodId} onChange={(event) => selectFood(index, event.currentTarget.value)}><option value="">Seleccionar alimento verificado</option>{(foods ?? []).filter((food) => food.group === ingredient.group && food.verifiedAt && !food.portionPending && food.isFreeConsumption === ingredient.isFreeConsumption).map((food) => <option key={food.id} value={food.id}>{food.name}</option>)}</Select></Field>
+                      {!ingredient.isFreeConsumption && <Field label={`Unidad ${index + 1}`}><Input readOnly value={ingredient.unit ?? ''} /></Field>}
                       {ingredient.isFreeConsumption ? <div className="free-purchase-fields"><p className="free-ingredient-label">Libre para equivalencias. Indica cantidad solo si quieres sumarla a compras.</p><Field label="Cantidad para compras"><Input placeholder="Ej. 2" value={ingredient.quantity ?? ''} onChange={(_event, value) => updateIngredient(index, { quantity: value.value || null })} /></Field><Field label="Unidad de compra"><Input placeholder="Ej. tazas" value={ingredient.unit ?? ''} onChange={(_event, value) => updateIngredient(index, { unit: value.value || null })} /></Field></div> : <Field label={`Cantidad (${ingredient.unit ?? 'unidad'})`} required><Input required placeholder="Ej. 1/2" value={ingredient.quantity ?? ''} onChange={(_event, value) => updateIngredient(index, { quantity: value.value || null, group: ingredient.group })} /></Field>}
                       <Button type="button" icon={<DeleteRegular />} aria-label={`Quitar ingrediente ${index + 1}`} title="Quitar ingrediente" onClick={() => setEditor({ ...editor, verify: false, ingredients: editor.ingredients.filter((_item, itemIndex) => itemIndex !== index) })} />
                     </div>
@@ -242,16 +247,16 @@ export function RecipesPage() {
                 </section>
                 <section className="recipe-steps-editor"><h3>Preparación</h3>{editor.instructions.map((instruction, index) => <div className="recipe-ingredient-row" key={index}><Field label={`Paso ${index + 1}`} required><Input required value={instruction} onChange={(_event, value) => setEditor({ ...editor, verify: false, instructions: editor.instructions.map((step, stepIndex) => stepIndex === index ? value.value : step) })} /></Field><Button type="button" icon={<DeleteRegular />} aria-label={`Quitar paso ${index + 1}`} title="Quitar paso" onClick={() => setEditor({ ...editor, verify: false, instructions: editor.instructions.filter((_step, stepIndex) => stepIndex !== index) })} /></div>)}<Button type="button" icon={<AddRegular />} onClick={() => setEditor({ ...editor, verify: false, instructions: [...editor.instructions, ''] })}>Añadir paso</Button></section>
                 {prescriptionsError && <p role="alert" className="form-error">No se pudo cargar la prescripción del perfil seleccionado.</p>}
-                {!prescriptionsBusy && !currentPrescription && <MessageBar intent="warning"><MessageBarBody>No hay una prescripción guardada para {editor.mealTime} en el perfil seleccionado.</MessageBarBody></MessageBar>}
+                {editor.personId !== null && !prescriptionsBusy && !currentPrescription && <MessageBar intent="warning"><MessageBarBody>No hay una prescripción guardada para {editor.mealTime} en el perfil seleccionado.</MessageBarBody></MessageBar>}
                 {missingGroups.length > 0 && <MessageBar intent="warning"><MessageBarBody>Falta añadir ingredientes de estos tipos prescritos: {missingGroups.map((group) => group === 'Proteinas' ? 'Proteínas' : group === 'Lacteos' ? 'Lácteos' : group).join(', ')}.</MessageBarBody></MessageBar>}
                 {editor.reviewNotes.length > 0 && <MessageBar intent="warning"><MessageBarBody>Resuelve las notas pendientes antes de verificar esta receta.</MessageBarBody></MessageBar>}
-                <Checkbox checked={editor.verify} disabled={!canVerify} onChange={(_event, value) => setEditor({ ...editor, verify: Boolean(value.checked) })} label="Verificar equivalencias contra la prescripción actual" />
+                <Checkbox checked={editor.verify} disabled={!canVerify} onChange={(_event, value) => setEditor({ ...editor, verify: Boolean(value.checked) })} label={editor.personId === null ? 'Validar ingredientes de la receta base' : 'Verificar equivalencias contra la prescripción actual'} />
                 <p className="field-note">El servidor habilita la receta solo si cada tipo prescrito está presente y las cantidades suman exactamente.</p>
                 {editorError && <p role="alert" className="form-error">{editorError}</p>}
               </form>
             ) : detailBusy ? <p role="status">Cargando receta...</p> : detailError ? <p role="alert" className="form-error">{detailError}</p> : detail && (
               <>
-                <p>{detail.personName} · {detail.mealTime}</p>
+                <p>{detail.personName ?? 'Recetas base'} · {detail.mealTime}</p>
                 {detail.imageUrl && <figure className="recipe-image"><img src={detail.imageUrl} alt={detail.name} /><figcaption>{detail.imageAttribution ? <a href={detail.imageAttribution} target="_blank" rel="noreferrer">Fuente de la imagen</a> : 'Imagen de receta'}{detail.imageLicense ? ` · ${detail.imageLicense}` : ''}</figcaption></figure>}
                 {!detail.verifiedAt && <MessageBar intent="warning"><MessageBarBody>Borrador no disponible en listas hasta completar ingredientes y verificar equivalencias.</MessageBarBody></MessageBar>}
                 {detail.sourceText && <section><h3>Propuesta original</h3><p className="recipe-source">{detail.sourceText}</p></section>}

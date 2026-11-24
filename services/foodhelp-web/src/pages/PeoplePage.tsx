@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button, Checkbox, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, Input, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from '@fluentui/react-components';
 import { AddRegular, ArrowClockwiseRegular, DeleteRegular, DismissRegular, EditRegular, SaveRegular } from '@fluentui/react-icons';
-import { prescriptionFoodGroups, prescriptionSchema } from '@foodhelp/contracts';
+import { mealTimes, prescriptionFoodGroups, prescriptionSchema, withZeroColacion } from '@foodhelp/contracts';
 import { api } from '../api';
 import type { PrescriptionInput, PrescriptionRecord, RecipeInheritanceResult } from '../api/types';
 import { PageFrame, SectionHeading } from '../components/PageFrame';
 import { useResource } from '../hooks/useResource';
+import { dailyPrescriptionTotals } from '../utils/recipe-portions';
 
 type MealRow = PrescriptionInput['meals'][number] & { key: string };
 type Editor = { id?: string; month: string; indicatedOn: string; reviewed: boolean; meals: MealRow[] };
@@ -42,7 +43,7 @@ export function PeoplePage() {
   function clearMessages() { setFormError(null); setFormMessage(null); }
   function editPrescription(record: PrescriptionRecord) {
     clearMessages();
-    setEditor({ id: record.id, month: record.month, indicatedOn: record.indicatedOn ?? '', reviewed: false, meals: record.meals.map((meal) => ({ ...meal, key: crypto.randomUUID() })) });
+    setEditor({ id: record.id, month: record.month, indicatedOn: record.indicatedOn ?? '', reviewed: false, meals: withZeroColacion(record.meals).map((meal) => ({ ...meal, key: crypto.randomUUID() })) });
   }
   function updateMeal(key: string, changes: Partial<MealRow>) {
     setEditor((current) => current && ({ ...current, reviewed: false, meals: current.meals.map((meal) => meal.key === key ? { ...meal, ...changes } : meal) }));
@@ -95,6 +96,7 @@ export function PeoplePage() {
       <section className="content-section person-selector">
         <Field label="Persona seleccionada"><Select disabled={saving || people.length === 0} value={personId} onChange={(event) => { setSelectedPersonId(event.currentTarget.value); setEditor(null); clearMessages(); }}>{people.length === 0 && <option value="">Sin personas registradas</option>}{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
         <form className="form-panel" onSubmit={addPerson}><SectionHeading>Agregar persona</SectionHeading><Field label="Nombre" required><Input name="name" required maxLength={120} disabled={saving} /></Field><Field label="Heredar recetas de" hint="Se ajustan a la prescripción del nuevo perfil al guardarla."><Select value={newBasePersonId} disabled={saving} onChange={(event) => setNewBasePersonId(event.currentTarget.value)}><option value="">Sin perfil base</option>{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field><Button type="submit" icon={<AddRegular />} disabled={saving}>Agregar</Button></form>
+        <div className="form-panel"><SectionHeading>Recetas base</SectionHeading><Button icon={<ArrowClockwiseRegular />} disabled={saving || !personId} onClick={async () => { clearMessages(); setSaving(true); try { setFormMessage(inheritanceMessage(await api.inheritRecipes(personId, null))); } catch (caught) { setFormError(caught instanceof Error ? caught.message : 'No se pudieron copiar las recetas base.'); } finally { setSaving(false); } }}>Copiar recetas base</Button></div>
         {baseOptions.length > 0 && <div className="form-panel"><SectionHeading detail="Copia sin duplicar las recetas que falten">Heredar recetas</SectionHeading><Field label={`Perfil base para ${selectedPerson?.name ?? 'esta persona'}`}><Select value={inheritFromId} disabled={saving} onChange={(event) => setInheritBaseId(event.currentTarget.value)}>{baseOptions.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field><Button icon={<ArrowClockwiseRegular />} disabled={saving || !personId || !inheritFromId} onClick={inheritNow}>Heredar recetas</Button></div>}
       </section>
       {formError && <p className="form-error" role="alert">{formError}</p>}
@@ -105,6 +107,7 @@ export function PeoplePage() {
           <div className="prescription-list">{(prescriptions.data ?? []).map((record) => (
             <section key={record.id} className="prescription-record">
               <div className="prescription-heading"><div><h2>{record.month}</h2><p>Consulta: {record.indicatedOn ?? 'Sin fecha registrada'}</p></div><div className="action-row"><Button icon={<EditRegular />} disabled={saving} onClick={() => editPrescription(record)}>Editar</Button><Button icon={<DeleteRegular />} disabled={saving} onClick={() => { clearMessages(); setToDelete(record); }}>Eliminar</Button></div></div>
+              <div className="table-frame"><Table aria-label={`Totales por día ${record.month}`}><TableHeader><TableRow><TableHeaderCell>Grupo</TableHeaderCell>{mealTimes.map((mealTime) => <TableHeaderCell key={mealTime}>{mealTime}</TableHeaderCell>)}<TableHeaderCell>Total por día</TableHeaderCell></TableRow></TableHeader><TableBody>{prescriptionFoodGroups.map((group) => <TableRow key={group}><TableCell>{groupLabel(group)}</TableCell>{mealTimes.map((mealTime) => <TableCell key={mealTime}>{record.meals.find((meal) => meal.group === group && meal.mealTime === mealTime)?.equivalents ?? '0'}</TableCell>)}<TableCell><strong>{dailyPrescriptionTotals(record.meals).get(group) ?? '0'}</strong></TableCell></TableRow>)}</TableBody></Table></div>
               <div className="table-frame"><Table aria-label={`Prescripción ${record.month}`}><TableHeader><TableRow><TableHeaderCell>Tiempo</TableHeaderCell><TableHeaderCell>Grupo</TableHeaderCell><TableHeaderCell>Porciones</TableHeaderCell><TableHeaderCell>Indicación</TableHeaderCell><TableHeaderCell>Alimento preferido</TableHeaderCell></TableRow></TableHeader><TableBody>{record.meals.map((meal, index) => <TableRow key={index}><TableCell>{meal.mealTime}</TableCell><TableCell>{groupLabel(meal.group)}</TableCell><TableCell>{meal.equivalents}</TableCell><TableCell>{meal.requirementKind === 'free_guidance' ? 'Libre' : 'Exacta'}{meal.notes && <p className="prescription-note">{meal.notes}</p>}</TableCell><TableCell>{foods.data?.find((food) => food.id === meal.preferredFoodId)?.name ?? (meal.preferredFoodId ? 'Alimento asignado' : 'Sin preferencia')}</TableCell></TableRow>)}</TableBody></Table></div>
             </section>
           ))}{prescriptions.data?.length === 0 && <p>No hay prescripciones guardadas para esta persona.</p>}</div>
@@ -125,7 +128,7 @@ export function PeoplePage() {
               <Button className="remove-prescription-row" type="button" icon={<DeleteRegular />} title={`Eliminar fila ${index + 1}`} aria-label={`Eliminar fila ${index + 1}`} disabled={editor.meals.length === 1} onClick={() => setEditor({ ...editor, reviewed: false, meals: editor.meals.filter((row) => row.key !== meal.key) })} />
             </div>
           ))}
-          <datalist id="meal-times">{['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((meal) => <option key={meal} value={meal} />)}</datalist>
+          <datalist id="meal-times">{mealTimes.map((meal) => <option key={meal} value={meal} />)}</datalist>
           <Button type="button" icon={<AddRegular />} onClick={() => setEditor({ ...editor, reviewed: false, meals: [...editor.meals, emptyMeal()] })}>Añadir indicación</Button>
           <Checkbox checked={editor.reviewed} onChange={(_event, value) => setEditor({ ...editor, reviewed: !!value.checked })} label="Confirmo que todas las indicaciones coinciden con la prescripción" />
           <div className="action-row action-row-start"><Button type="submit" appearance="primary" icon={<SaveRegular />} disabled={!editor.reviewed}>Guardar prescripción</Button><Button type="button" icon={<DismissRegular />} onClick={() => { setEditor(null); clearMessages(); }}>Cancelar</Button></div>

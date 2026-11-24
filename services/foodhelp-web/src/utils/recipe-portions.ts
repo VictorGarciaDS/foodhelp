@@ -81,3 +81,9 @@ export function prescriptionAlerts(meals: Meal[], ingredients: RecipeEdit['ingre
       : `${labels[group] ?? group}: demasiado; excede ${format({ ...delta, numerator: -delta.numerator })} porciones (${format(total)} de ${format(target)}).`];
   });
 }
+
+export function dailyPrescriptionTotals(meals: Meal[]): Map<string, string> {
+  const totals = new Map<string, Rational>();
+  for (const meal of meals) totals.set(meal.group, add(totals.get(meal.group) ?? zero, parse(meal.equivalents) ?? zero));
+  return new Map([...totals].map(([group, value]) => [group, format(value)]));
+}

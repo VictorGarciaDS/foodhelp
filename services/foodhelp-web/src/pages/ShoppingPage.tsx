@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Button, Card, Field, Input, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from '@fluentui/react-components';
 import { AddRegular, DocumentRegular, ShoppingBagRegular, WarningRegular } from '@fluentui/react-icons';
-import { canRepeatShoppingMeal, mealTimes, type Person } from '@foodhelp/contracts';
+import { canRepeatShoppingMeal, mainMealTimes, mealTimes, type Person } from '@foodhelp/contracts';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import type { GeneratedShoppingList, RecipeSummary, ShoppingPlan } from '../api/types';
@@ -10,7 +10,7 @@ import { useResource } from '../hooks/useResource';
 
 type MealTime = (typeof mealTimes)[number];
 type MenuDay = { key: string; meals: Record<MealTime, string> };
-const emptyMeals = (): Record<MealTime, string> => ({ Desayuno: '', Almuerzo: '', Comida: '', Cena: '' });
+const emptyMeals = (): Record<MealTime, string> => ({ Desayuno: '', Almuerzo: '', Comida: '', Cena: '', Colacion: '' });
 const createDay = (): MenuDay => ({ key: crypto.randomUUID(), meals: emptyMeals() });
 const amountForDisplay = (value: string) => value.replace('/', ' / ');
 const purchaseUnitForDisplay = (quantity: string, unit: string) => quantity === '1'
@@ -36,7 +36,7 @@ export function ShoppingPage() {
     setPersonId((current) => people.some((person) => person.id === current) ? current : people[0].id);
   }, [people]);
 
-  const allMealsSelected = menuDays.length > 0 && menuDays.every((day) => mealTimes.every((mealTime) => Boolean(day.meals[mealTime])));
+  const allMealsSelected = menuDays.length > 0 && menuDays.every((day) => mainMealTimes.every((mealTime) => Boolean(day.meals[mealTime])));
   const canCalculate = Boolean(personId) && allMealsSelected && Number.isInteger(Number(peopleCount)) && Number(peopleCount) >= 1 && Number(peopleCount) <= 31 && !busy;
 
   function resizeMenuDays(count: number) {
@@ -64,7 +64,7 @@ export function ShoppingPage() {
     }
     setBusy(true);
     try {
-      const meals = mealTimes.map((mealTime) => ({ mealTime, recipeIds: menuDays.map((day) => day.meals[mealTime]) }));
+      const meals = mainMealTimes.map((mealTime) => ({ mealTime, recipeIds: menuDays.map((day) => day.meals[mealTime]) }));
       const plan: ShoppingPlan = { days: menuDays.length, daysPerDish: Number(daysPerDish), peopleCount: Number(peopleCount), participants: [{ personId, meals }] };
       setResult(await api.calculateShopping(plan));
       setLastPlan(plan);
@@ -91,7 +91,7 @@ export function ShoppingPage() {
           </div>
           {menuDays.map((day, dayIndex) => <Card appearance="outline" className="shopping-participant" key={day.key}>
             <div className="shopping-planner-heading"><SectionHeading detail={`Días ${dayIndex * Number(daysPerDish) + 1} a ${(dayIndex + 1) * Number(daysPerDish)}`}>Menú {dayIndex + 1}</SectionHeading></div>
-            <div className="shopping-meal-grid">{mealTimes.map((mealTime) => {
+            <div className="shopping-meal-grid">{mainMealTimes.map((mealTime) => {
               const previousId = dayIndex && !canRepeatShoppingMeal(mealTime) ? menuDays[dayIndex - 1].meals[mealTime] : '';
               const options = availableRecipes.filter((recipe) => recipe.personId === personId && recipe.mealTime === mealTime && recipe.id !== previousId);
               return <section className="shopping-meal" key={`${day.key}-${mealTime}`}>

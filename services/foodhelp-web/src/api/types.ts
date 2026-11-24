@@ -1,5 +1,5 @@
 import type {
-  CreateFood, EquivalentResult, Food, FoodGroup, RecipeCandidate, Person, RecipeDiscovery, RecipeEdit,
+  CreateFood, EquivalentResult, Food, FoodGroup, RecipeCandidate, Person, RecipeDiscovery, RecipeEdit, mealTimes,
 } from '@foodhelp/contracts';
 
 export type PageState = 'data' | 'loading' | 'empty' | 'error';
@@ -8,7 +8,7 @@ export type RecipeSummary = { id: string; name: string; verifiedAt: string | nul
 export type RecipeMatch = RecipeSummary & { matchCount: number; matchedFoodIds: string[] };
 export type RecipeIngredient = RecipeCandidate['ingredients'][number];
 export type RecipeDetail = RecipeSummary & { instructions: string[]; ingredients: RecipeIngredient[]; sourceText: string | null };
-export type ShoppingPlan = { days: number; daysPerDish?: number; peopleCount: number; participants: { personId: string; meals: { mealTime: 'Desayuno' | 'Almuerzo' | 'Comida' | 'Cena'; recipeIds: string[] }[] }[] };
+export type ShoppingPlan = { days: number; daysPerDish?: number; peopleCount: number; participants: { personId: string; meals: { mealTime: (typeof mealTimes)[number]; recipeIds: string[] }[] }[] };
 export type GeneratedShoppingList = { days: number; participantCount: number; peopleCount: number; participants: { personId: string; days: number }[]; usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[]; items: ShoppingItem[] };
 export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string; purchaseOptions: { unitName: string; quantity: string; contents: string; unit: string; purchaseUnit: string; isApproximate: boolean }[]; purchasePending: boolean };
 export type FoodPurchaseUnit = Food['purchaseUnits'][number];
@@ -27,7 +27,7 @@ export interface ApiClient {
   setFoodPurchaseUnits(foodId: string, purchaseUnits: FoodPurchaseUnit[]): Promise<FoodPurchaseUnit[]>;
   listPeople(): Promise<Person[]>;
   createPerson(name: string, basePersonId?: string | null): Promise<Person>;
-  inheritRecipes(personId: string, basePersonId: string): Promise<RecipeInheritanceResult>;
+  inheritRecipes(personId: string, basePersonId: string | null): Promise<RecipeInheritanceResult>;
   listPrescriptions(personId: string): Promise<PrescriptionRecord[]>;
   savePrescription(personId: string, input: PrescriptionInput): Promise<RecipeInheritanceResult | { error: string } | null>;
   deletePrescription(personId: string, prescriptionId: string): Promise<void>;

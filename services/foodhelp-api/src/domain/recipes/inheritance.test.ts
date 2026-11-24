@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planInheritance, type InheritedIngredient } from './inheritance';
+import { planInheritance, prescriptionFromIngredients, type InheritedIngredient } from './inheritance';
 
 const exact = (group: string, equivalents: string) => ({ group, equivalents, requirementKind: 'exact' });
 const beans: InheritedIngredient = { foodId: 'beans', quantity: '1/2', unit: 'tazas', group: 'Cereales y leguminosas', isFreeConsumption: false };
@@ -7,6 +7,15 @@ const peach: InheritedIngredient = { foodId: 'peach', quantity: '4', unit: 'piez
 const lettuce: InheritedIngredient = { foodId: 'lettuce', quantity: '1', unit: 'tazas', group: 'Verduras', isFreeConsumption: true };
 
 describe('recipe inheritance between profiles', () => {
+  it('derives base proportions without depending on a person prescription', () => {
+    const rows = prescriptionFromIngredients([beans, peach, lettuce], new Map([
+      ['beans', { baseQuantity: '1/2' }], ['peach', { baseQuantity: '2' }],
+    ]));
+    const plan = planInheritance(rows, rows.map((row) => row.requirementKind === 'exact' ? { ...row, equivalents: '2' } : row), [beans, peach, lettuce]);
+    expect(plan.mode).toBe('proportional');
+    expect(plan.ingredients[0].quantity).toBe('1');
+    expect(plan.ingredients[1].quantity).toBe('4');
+  });
   it('copies unchanged when groups and portions match', () => {
     const rows = [exact('Cereales y leguminosas', '1'), exact('Frutas', '2')];
     const plan = planInheritance(rows, rows, [beans, peach, lettuce]);

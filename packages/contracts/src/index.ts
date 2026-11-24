@@ -65,7 +65,7 @@ export const createPersonSchema = z.object({
   name: z.string().trim().min(1).max(120),
   basePersonId: z.string().uuid().nullable().optional(),
 });
-export const inheritRecipesSchema = z.object({ basePersonId: z.string().uuid() });
+export const inheritRecipesSchema = z.object({ basePersonId: z.string().uuid().nullable() });
 export const prescriptionSchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), reviewed: z.literal(true),
   indicatedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -109,9 +109,14 @@ export const recipeCandidateSchema = z.object({
     }
   })).min(1),
 });
-export const mealTimes = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'] as const;
+export const mainMealTimes = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'] as const;
+export const mealTimes = [...mainMealTimes, 'Colacion'] as const;
+export function withZeroColacion<T extends { mealTime: string; group: string; equivalents: string }>(rows: T[]) {
+  return [...rows, ...prescriptionFoodGroups.filter((group) => !rows.some((row) => row.mealTime === 'Colacion' && row.group === group))
+    .map((group) => ({ mealTime: 'Colacion', group, equivalents: '0', requirementKind: 'exact' as const, preferredFoodId: null, notes: null }))];
+}
 export const recipeEditSchema = z.object({
-  personId: z.string().uuid(),
+  personId: z.string().uuid().nullable(),
   name: z.string().trim().min(1).max(160),
   mealTime: z.enum(mealTimes),
   imageUrl: z.string().max(2000).refine((value) => /^https:\/\//.test(value) || /^\/images\/[\w\-/]+\.(jpe?g|png|webp)$/.test(value), 'Usa una URL https o una imagen local.').nullable().optional(),
@@ -155,11 +160,11 @@ export const shoppingPlanSchema = z.object({
   days: z.number().int().min(1).max(3),
   daysPerDish: z.number().int().min(1).max(3).default(1),
   peopleCount: z.number().int().min(1).max(31),
-  participants: z.array(z.object({ personId: z.string().uuid(), meals: z.array(shoppingMealSelectionSchema).length(4) })).length(1),
+  participants: z.array(z.object({ personId: z.string().uuid(), meals: z.array(shoppingMealSelectionSchema).min(4).max(5) })).length(1),
 }).superRefine((plan, context) => {
   plan.participants.forEach((participant, participantIndex) => {
     const selectedTimes = participant.meals.map((meal) => meal.mealTime);
-    if (new Set(selectedTimes).size !== 4 || mealTimes.some((mealTime) => !selectedTimes.includes(mealTime))) {
+    if (new Set(selectedTimes).size !== selectedTimes.length || mainMealTimes.some((mealTime) => !selectedTimes.includes(mealTime))) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['participants', participantIndex, 'meals'], message: 'Selecciona al menos una receta para cada tiempo de comida.' });
     }
     participant.meals.forEach((meal, mealIndex) => {
