@@ -375,6 +375,30 @@ describe('catalog and prescription routes', () => {
     });
   });
 
+  it.each([{ people: 1, duration: 1, grams: '122', jars: '1' }, { people: 20, duration: 2, grams: '4880', jars: '5' }])('converts Habits tablespoons and rounds jars only after summing: $grams g', async ({ people, duration, grams, jars }) => {
+    const personId = '00000000-0000-4000-8000-000000000001';
+    const foodId = '00000000-0000-4000-8000-000000000002';
+    const mealTimes = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'];
+    const recipes = mealTimes.map((mealTime, index) => ({
+      id: `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`,
+      personId, mealTime, ingredients: [{ foodId, quantity: '1', unit: 'cucharada', isFreeConsumption: false }],
+    }));
+    database.query.mockResolvedValueOnce({ rows: [{ name: 'Familia' }], rowCount: 1 });
+    database.query.mockResolvedValueOnce({ rows: recipes, rowCount: 4 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: foodId, name: 'Habits', purchaseUnits: [
+      { unitName: 'gramos', quantity: '1', unit: 'cucharadas', purchaseQuantity: '30.5', purchaseUnit: 'g', isConfirmed: true, isApproximate: false, roundUp: false },
+      { unitName: 'botes de 1 kg', quantity: '2000/61', unit: 'cucharadas', purchaseQuantity: '1', purchaseUnit: 'botes de 1 kg', isConfirmed: true, isApproximate: false, roundUp: true },
+    ] }], rowCount: 1 });
+    const response = await request('/shopping-list/calculate', 'POST', {
+      days: 1, daysPerDish: duration, peopleCount: people,
+      participants: [{ personId, meals: recipes.map((recipe) => ({ mealTime: recipe.mealTime, recipeIds: [recipe.id] })) }],
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ items: [{ purchasePending: false, purchaseOptions: [
+      { quantity: grams, purchaseUnit: 'g' }, { quantity: jars, purchaseUnit: 'botes de 1 kg' },
+    ] }] });
+  });
+
   it('counts unmeasured free vegetables as recipe portions in the shopping list', async () => {
     const personId = '00000000-0000-4000-8000-000000000001';
     const vegetableId = '00000000-0000-4000-8000-000000000004';

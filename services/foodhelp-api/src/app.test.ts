@@ -24,7 +24,8 @@ describe('API health endpoint', () => {
     const response = await fetch(`http://127.0.0.1:${address.port}/api/health`);
     const body = await response.json() as { status: string; services: Record<string, string> };
     expect(response.status).toBe(503);
-    expect(body).toEqual({ status: 'unhealthy', services: { database: 'unavailable' } });
+    expect(body).toMatchObject({ status: 'unhealthy', services: { database: 'unavailable' }, revision: expect.any(String) });
+    expect(response.headers.get('cache-control')).toBe('no-store');
     expect(JSON.stringify(body)).not.toContain('DATABASE_URL');
   });
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button, Card, Checkbox, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, Input, MessageBar, MessageBarBody, Select, Textarea } from '@fluentui/react-components';
 import { AddRegular, BookmarkRegular, DeleteRegular, DismissRegular, EditRegular, EyeRegular, SaveRegular } from '@fluentui/react-icons';
-import { foodGroups, freeFoodGroups, mealTimes, type Food, type FoodGroup, type Person, type RecipeEdit } from '@foodhelp/contracts';
+import { foodGroups, freeFoodGroups, mealTimes, recipeEditSchema, type Food, type FoodGroup, type Person, type RecipeEdit } from '@foodhelp/contracts';
 import { api } from '../api';
 import type { RecipeDetail, RecipeIngredient, RecipeMatch, RecipeSummary } from '../api/types';
 import { PageFrame, SectionHeading } from '../components/PageFrame';
@@ -114,7 +114,9 @@ export function RecipesPage() {
     setEditorError(null);
     setSaving(true);
     try {
-      const saved = creating ? await api.createRecipe(editor) : selectedId ? await api.updateRecipe(selectedId, editor) : null;
+      const validated = recipeEditSchema.safeParse(editor);
+      if (!validated.success) throw new Error(validated.error.issues.map((issue) => issue.message).join(' '));
+      const saved = creating ? await api.createRecipe(validated.data) : selectedId ? await api.updateRecipe(selectedId, validated.data) : null;
       if (!saved) return;
       setEditor(null);
       setCreating(false);
@@ -220,13 +222,13 @@ export function RecipesPage() {
           <DialogTitle>{editor ? creating ? 'Nueva receta' : 'Editar receta' : recipes.find((recipe) => recipe.id === selectedId)?.name ?? 'Receta'}</DialogTitle>
           <DialogContent>
             {editor ? (
-              <form id="recipe-editor" className="recipe-editor" onSubmit={saveEditor}>
+              <form id="recipe-editor" className="recipe-editor" noValidate onSubmit={saveEditor}>
                 <Field label="Nombre" required><Input required maxLength={160} value={editor.name} onChange={(_event, value) => setEditor({ ...editor, name: value.value, verify: false })} /></Field>
                 <Field label="Perfil"><Select value={editor.personId ?? ''} onChange={(event) => setEditor({ ...editor, personId: event.currentTarget.value || null, verify: false })}><option value="">Recetas base</option>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
                 <Field label="Tiempo de comida" required><Select value={editor.mealTime} onChange={(event) => setEditor({ ...editor, mealTime: event.currentTarget.value as RecipeEdit['mealTime'], verify: false })}>{mealTimes.map((mealTime) => <option key={mealTime}>{mealTime}</option>)}</Select></Field>
                 <Field label="Propuesta original" required><Textarea required resize="vertical" value={editor.sourceText} onChange={(_event, value) => setEditor({ ...editor, sourceText: value.value, verify: false })} /></Field>
                 <Field label="URL de imagen"><Input inputMode="url" value={editor.imageUrl ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageUrl: value.value || null, verify: false })} placeholder="/images/recipes/... o https://..." /></Field>
-                <Field label="Fuente / autor de imagen"><Input type="url" value={editor.imageAttribution ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageAttribution: value.value || null, verify: false })} placeholder="https://commons.wikimedia.org/wiki/File:..." /></Field>
+                <Field label="Fuente / autor de imagen"><Input value={editor.imageAttribution ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageAttribution: value.value || null, verify: false })} placeholder="Fuente o autor de la imagen" /></Field>
                 <Field label="Licencia / crédito"><Input value={editor.imageLicense ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageLicense: value.value || null, verify: false })} placeholder="Autor · CC BY 4.0" /></Field>
                 <Field label="Pendientes de revisión"><Textarea resize="vertical" placeholder="Una nota pendiente por línea; deja vacío para confirmar que se resolvieron." value={editor.reviewNotes.join('\n')} onChange={(_event, value) => setEditor({ ...editor, reviewNotes: value.value.split('\n').map((note) => note.trim()).filter(Boolean), verify: false })} /></Field>
                 <section className="recipe-ingredients-editor">

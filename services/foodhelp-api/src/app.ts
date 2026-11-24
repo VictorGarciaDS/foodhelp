@@ -19,10 +19,12 @@ export function createApp(): express.Express {
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', async (_request, response) => {
+    response.setHeader('Cache-Control', 'no-store');
     const ready = await databaseReady();
     response.status(ready ? 200 : 503).json({
       status: ready ? 'healthy' : 'unhealthy',
       services: { database: ready ? 'healthy' : 'unavailable' },
+      revision: process.env.RENDER_GIT_COMMIT ?? process.env.FOODHELP_BUILD_REVISION ?? 'local',
     });
   });
 
@@ -35,6 +37,7 @@ export function createApp(): express.Express {
   const webDist = path.resolve(__dirname, '../../foodhelp-web/dist');
   app.use(express.static(webDist, { index: false }));
   app.get('/{*path}', (_request, response, next) => {
+    response.setHeader('Cache-Control', 'no-store');
     response.sendFile(path.join(webDist, 'index.html'), (error) => { if (error) next(); });
   });
   app.use((_request, response) => response.status(404).json({

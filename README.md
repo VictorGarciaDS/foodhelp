@@ -51,6 +51,10 @@ Las migraciones estan en `services/foodhelp-api/src/db/migrations`. Cada objeto 
 
 ## Despliegue
 
+El editor valida con el contrato compartido, sin bloqueo HTML nativo de URL; el campo Fuente / autor admite texto y la imagen admite `/images/...` o https. Si aparece el mensaje antiguo `Receta o persona asociada no encontrada.`, el servidor no esta ejecutando el codigo que permite bases sin persona. Confirme en Render que el despliegue Live corresponde al ultimo commit y use Manual Deploy / Clear build cache & deploy si sigue sirviendo un build anterior. El HTML se envia con `Cache-Control: no-store`; `/api/health` incluye `revision` (el `RENDER_GIT_COMMIT` de Render) para identificar la version sin exponer secretos.
+
+Las migraciones `0016` a `0018` completan el catalogo con las conversiones confirmadas por la familia. Los pesos domesticos aprobados son aproximados; Habits se registro a 30.5 g por cucharada y botes de 1 kg. `scripts/audit-recipe-preparations.cjs --pending-report=docs/purchase-units-pending.md` audita tanto alimentos sin conversion como medidas de recetas sin conversion compatible. Los moles conservan dos bases (res y pollo) y sus dos copias de Patricia; no son duplicados del mismo perfil.
+
 Use un Render Web Service unico con build `npm ci --include=dev && npm run build`, start `npm start`, `PORT` asignado por Render y TLS. Configure autenticacion, `DATABASE_URL` con TLS y, solo si se aprueba la integracion IA, las variables `AI_*` en Render. No publique la aplicacion sin proteccion de acceso activa. `GET /api/health` no expone secretos.
 
 El build genera miniaturas WebP locales con Sharp en `public/images/thumbnails`: 76 x 64 para recetas y 32 x 32 para alimentos. Los listados usan estas copias; Ver detalle conserva la imagen original de la receta. Para regenerarlas sin compilar, ejecute `npm run images:thumbnails`. Los originales no se modifican y no se necesita cambiar la base de datos. Incluya Sharp y el lockfile en el commit; Render necesita instalar las dependencias de desarrollo durante el build.

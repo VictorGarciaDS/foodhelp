@@ -6,6 +6,21 @@ import { describe, expect, it } from 'vitest';
 const schema = readFileSync(resolve(__dirname, '0001_foodhelp_schema.sql'), 'utf8');
 
 describe('foodhelp schema migration', () => {
+  it('uses the confirmed Habits tablespoon weight and an exact one-kilogram package ratio', () => {
+    const migration = readFileSync(resolve(__dirname, '0017_remaining_confirmed_purchase_units.sql'), 'utf8');
+    expect(migration).toContain("'cucharadas', '30.5', 'g'");
+    expect(migration).toContain("'2000/61', 'cucharadas', '1', 'botes de 1 kg'");
+    expect(migration).toContain("'gramos secos por taza cocida'");
+    expect(migration).not.toContain('UPDATE foodhelp.foods');
+  });
+  it('marks confirmed domestic weights as approximate without changing prescription portions', () => {
+    const migration = readFileSync(resolve(__dirname, '0016_confirmed_domestic_purchase_weights.sql'), 'utf8');
+    expect(migration).toContain("('Cebolla', 'cucharadas', '10')");
+    expect(migration).toContain("('Ajo', 'dientes', '3')");
+    expect(migration).toContain("'g', true, true, false");
+    expect(migration).not.toContain('UPDATE foodhelp.foods');
+    expect(migration).not.toContain('Habits');
+  });
   it('adds cotija and zero snack rows while retaining independently linked profile recipes', () => {
     const foodMigration = readFileSync(resolve(__dirname, '0014_cotija_and_colacion.sql'), 'utf8');
     expect(foodMigration).toContain("'Queso cotija', 'Proteinas', '35', 'g', false");
