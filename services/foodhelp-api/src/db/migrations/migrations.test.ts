@@ -6,6 +6,13 @@ import { describe, expect, it } from 'vitest';
 const schema = readFileSync(resolve(__dirname, '0001_foodhelp_schema.sql'), 'utf8');
 
 describe('foodhelp schema migration', () => {
+  it('adds only the confirmed new foods without replacing existing equivalences', () => {
+    const migration = readFileSync(resolve(__dirname, '0020_requested_food_additions.sql'), 'utf8');
+    expect(migration).toContain("'Leche deslactosada light', 'Lacteos', '1', 'taza'");
+    expect(migration).toContain("'Pan Cero Cero', 'Cereales y leguminosas', '1.5', 'rebanadas'");
+    expect(migration).toContain("'Proteína Evolution WP100', 'gramos por cucharada', '1', 'cucharadas', '33.3', 'g'");
+    expect(migration).not.toContain('UPDATE foodhelp.foods');
+  });
   it('protects catalog equivalences while allowing explicitly authorized maintenance', () => {
     const migration = readFileSync(resolve(__dirname, '0019_protect_food_equivalences.sql'), 'utf8');
     expect(migration).toContain('CREATE UNIQUE INDEX foods_normalized_name_idx');

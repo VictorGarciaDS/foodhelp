@@ -39,7 +39,7 @@ describe('API health endpoint', () => {
       { path: `/api/people/${personId}/prescriptions` },
       { path: `/api/people/${personId}/prescriptions/${personId}`, method: 'DELETE' },
       { path: '/api/people', method: 'POST', body: { name: 'Persona ingresada por la familia' } },
-      { path: `/api/people/${personId}/prescription`, method: 'PUT', body: { month: '2026-10', reviewed: true, meals: [{ mealTime: 'comida', group: 'Frutas', equivalents: '1' }] } },
+      { path: `/api/people/${personId}/prescription`, method: 'PUT', body: { month: '2026-10', reviewed: true, meals: [{ mealTime: 'Comida', group: 'Frutas', equivalents: '1' }] } },
       { path: '/api/equivalents/calculate', method: 'POST', body: { foodId: personId, quantity: '2', unit: 'unidad' } },
       { path: '/api/recipes' },
       { path: `/api/recipes/${personId}` },

@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit';
 import type { Response } from 'express';
-import { mealTimes } from '@foodhelp/contracts';
+import { mealTimeLabel, mealTimes } from '@foodhelp/contracts';
 
 export function streamPdf(response: Response, title: string, rows: string[]): void {
   response.type('application/pdf');
@@ -57,7 +57,7 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
     doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.primary).text(`Día ${day}`, left);
     for (const entry of entries) {
       const y = doc.y + 2;
-      doc.font('Helvetica-Bold').fontSize(9.5).fillColor(colors.muted).text(entry.mealTime, left + 10, y, { width: 80 });
+      doc.font('Helvetica-Bold').fontSize(9.5).fillColor(colors.muted).text(mealTimeLabel(entry.mealTime), left + 10, y, { width: 80 });
       doc.font('Helvetica').fillColor(colors.text).text(entry.recipeName, left + 92, y, { width: width - 92 });
     }
     doc.moveDown(0.5);
@@ -71,7 +71,7 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
     const recipes = data.recipes.filter((recipe) => recipe.mealTime === mealTime);
     if (!recipes.length) continue;
     ensure(60);
-    doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(11).text(mealTime, left);
+    doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(11).text(mealTimeLabel(mealTime), left);
     doc.moveDown(0.3);
     for (const recipe of recipes) {
       ensure(50);

@@ -65,6 +65,9 @@ export const createPersonSchema = z.object({
   name: z.string().trim().min(1).max(120),
 });
 export const inheritRecipesSchema = z.object({ basePersonId: z.string().uuid().nullable() });
+export const mainMealTimes = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'] as const;
+export const mealTimes = [...mainMealTimes, 'Colacion'] as const;
+export const mealTimeLabel = (mealTime: string): string => mealTime === 'Colacion' ? 'Colación' : mealTime;
 export const prescriptionSchema = z.object({
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/), reviewed: z.literal(true),
   indicatedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((value) => {
@@ -72,7 +75,7 @@ export const prescriptionSchema = z.object({
     return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
   }, 'La fecha de consulta no es válida.').nullable().optional(),
   meals: z.array(z.object({
-    mealTime: z.string().trim().min(1).max(80), group: z.enum(prescriptionFoodGroups), equivalents: z.string().regex(/^\d+(?:\.\d+)?$/),
+    mealTime: z.enum(mealTimes), group: z.enum(prescriptionFoodGroups), equivalents: z.string().regex(/^\d+(?:\.\d+)?$/),
     requirementKind: z.enum(['exact', 'free_guidance']).optional(),
     preferredFoodId: z.string().uuid().nullable().optional(),
     notes: z.string().trim().max(4000).nullable().optional(),
@@ -108,8 +111,6 @@ export const recipeCandidateSchema = z.object({
     }
   })).min(1),
 });
-export const mainMealTimes = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'] as const;
-export const mealTimes = [...mainMealTimes, 'Colacion'] as const;
 export function withZeroColacion<T extends { mealTime: string; group: string; equivalents: string }>(rows: T[]) {
   return [...rows, ...prescriptionFoodGroups.filter((group) => !rows.some((row) => row.mealTime === 'Colacion' && row.group === group))
     .map((group) => ({ mealTime: 'Colacion', group, equivalents: '0', requirementKind: 'exact' as const, preferredFoodId: null, notes: null }))];

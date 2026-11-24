@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button, Checkbox, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, Input, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from '@fluentui/react-components';
 import { AddRegular, ArrowClockwiseRegular, DeleteRegular, DismissRegular, EditRegular, SaveRegular } from '@fluentui/react-icons';
-import { mealTimes, prescriptionFoodGroups, prescriptionSchema, withZeroColacion } from '@foodhelp/contracts';
+import { mealTimeLabel, mealTimes, prescriptionFoodGroups, prescriptionSchema, withZeroColacion } from '@foodhelp/contracts';
 import { api } from '../api';
 import type { PrescriptionInput, PrescriptionRecord, RecipeInheritanceResult } from '../api/types';
 import { PageFrame, SectionHeading } from '../components/PageFrame';
@@ -9,9 +9,9 @@ import { useResource } from '../hooks/useResource';
 import { dailyPrescriptionTotals } from '../utils/recipe-portions';
 
 type MealRow = PrescriptionInput['meals'][number] & { key: string };
-type Editor = { id?: string; month: string; indicatedOn: string; reviewed: boolean; meals: MealRow[] };
+type Editor = { id?: string; originalMonth?: string; month: string; indicatedOn: string; reviewed: boolean; meals: MealRow[] };
 const groupLabel = (group: string) => ({ Proteinas: 'Proteínas', Azucar: 'Azúcar', Lacteos: 'Lácteos' }[group] ?? group);
-const emptyMeal = (): MealRow => ({ key: crypto.randomUUID(), mealTime: '', group: 'Frutas', equivalents: '', requirementKind: 'exact', preferredFoodId: null, notes: null });
+const emptyMeal = (): MealRow => ({ key: crypto.randomUUID(), mealTime: 'Desayuno', group: 'Frutas', equivalents: '', requirementKind: 'exact', preferredFoodId: null, notes: null });
 const inheritanceMessage = (result: RecipeInheritanceResult) => result.copied === 0
   ? 'No hay recetas base que sincronizar.'
   : `Recetas sincronizadas: ${result.copied}. Verificadas: ${result.verified}; por revisar: ${result.drafts}.`;
@@ -26,6 +26,8 @@ export function PeoplePage() {
   const foods = useResource(() => api.listFoods(), 0);
   const [editor, setEditor] = useState<Editor | null>(null);
   const editorRef = useRef<HTMLFormElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const savingPrescription = useRef(false);
   const editorOpen = editor !== null;
   useEffect(() => {
     if (editorOpen) editorRef.current?.scrollIntoView({ block: 'start' });
@@ -35,11 +37,14 @@ export function PeoplePage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [formMessage, setFormMessage] = useState<string | null>(null);
   const pageState = error ? 'error' : busy ? 'loading' : 'data';
+  useEffect(() => {
+    if (formError && editorOpen) errorRef.current?.focus();
+  }, [formError, editorOpen]);
 
   function clearMessages() { setFormError(null); setFormMessage(null); }
   function editPrescription(record: PrescriptionRecord) {
     clearMessages();
-    setEditor({ id: record.id, month: record.month, indicatedOn: record.indicatedOn ?? '', reviewed: false, meals: withZeroColacion(record.meals).map((meal) => ({ ...meal, key: crypto.randomUUID() })) });
+    setEditor({ id: record.id, originalMonth: record.month, month: record.month, indicatedOn: record.indicatedOn ?? '', reviewed: false, meals: withZeroColacion(record.meals).map((meal) => ({ ...meal, key: crypto.randomUUID() })) });
   }
   function updateMeal(key: string, changes: Partial<MealRow>) {
     setEditor((current) => current && ({ ...current, reviewed: false, meals: current.meals.map((meal) => meal.key === key ? { ...meal, ...changes } : meal) }));
@@ -57,17 +62,18 @@ export function PeoplePage() {
   }
   async function savePrescription(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!editor || !personId) return;
+    if (!editor || !personId || savingPrescription.current) return;
+    savingPrescription.current = true;
     clearMessages(); setSaving(true);
     try {
-      if (!editor.id && prescriptions.data?.some((record) => record.month === editor.month)) throw new Error('Ya existe una prescripción para ese mes. Usa Editar para modificarla.');
+      if (prescriptions.data?.some((record) => record.month === editor.month && record.id !== editor.id)) throw new Error('Ya existe una prescripción para ese mes. Usa Editar sobre ella para no sobrescribirla.');
       const input = prescriptionSchema.safeParse({ month: editor.month, indicatedOn: editor.indicatedOn || null, reviewed: editor.reviewed, meals: editor.meals });
       if (!input.success) throw new Error(input.error.issues.map((issue) => issue.message).join(' '));
       const inheritance = await api.savePrescription(personId, input.data);
       setEditor(null); prescriptions.reload(); reload();
       setFormMessage(inheritance && 'error' in inheritance ? `Prescripción guardada. ${inheritance.error}` : inheritance ? `Prescripción guardada. ${inheritanceMessage(inheritance)}` : 'Prescripción completa guardada.');
     } catch (caught) { setFormError(caught instanceof Error ? caught.message : 'Revisa los valores capturados.'); }
-    finally { setSaving(false); }
+    finally { setSaving(false); savingPrescription.current = false; }
   }
   async function deletePrescription() {
     if (!toDelete || !personId) return;
@@ -86,7 +92,7 @@ export function PeoplePage() {
         <Field label="Persona seleccionada"><Select disabled={saving || people.length === 0} value={personId} onChange={(event) => { setSelectedPersonId(event.currentTarget.value); setEditor(null); clearMessages(); }}>{people.length === 0 && <option value="">Sin personas registradas</option>}{people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
         <form className="form-panel" onSubmit={addPerson}><SectionHeading>Agregar persona</SectionHeading><Field label="Nombre" required><Input name="name" required maxLength={120} disabled={saving} /></Field><Button type="submit" icon={<AddRegular />} disabled={saving}>Agregar</Button></form>
       </section>
-      {formError && <p className="form-error" role="alert">{formError}</p>}
+      {formError && !editor && <p className="form-error" role="alert">{formError}</p>}
       {formMessage && <p className="form-success" role="status">{formMessage}</p>}
       <section className="content-section">
         <div className="prescription-heading"><SectionHeading>{selectedPerson?.name ?? 'Prescripciones'}</SectionHeading><Button appearance="primary" icon={<AddRegular />} disabled={!personId || saving || prescriptions.busy || !!prescriptions.error} onClick={() => { clearMessages(); setEditor({ month: '', indicatedOn: '', reviewed: false, meals: [emptyMeal()] }); }}>Añadir prescripción</Button></div>
@@ -94,19 +100,19 @@ export function PeoplePage() {
           <div className="prescription-list">{(prescriptions.data ?? []).map((record) => (
             <section key={record.id} className="prescription-record">
               <div className="prescription-heading"><div><h2>{record.month}</h2><p>Consulta: {record.indicatedOn ?? 'Sin fecha registrada'}</p></div><div className="action-row"><Button icon={<EditRegular />} disabled={saving} onClick={() => editPrescription(record)}>Editar</Button><Button icon={<DeleteRegular />} disabled={saving} onClick={() => { clearMessages(); setToDelete(record); }}>Eliminar</Button></div></div>
-              <div className="table-frame"><Table aria-label={`Totales por día ${record.month}`}><TableHeader><TableRow><TableHeaderCell>Grupo</TableHeaderCell>{mealTimes.map((mealTime) => <TableHeaderCell key={mealTime}>{mealTime}</TableHeaderCell>)}<TableHeaderCell>Total por día</TableHeaderCell></TableRow></TableHeader><TableBody>{prescriptionFoodGroups.map((group) => <TableRow key={group}><TableCell>{groupLabel(group)}</TableCell>{mealTimes.map((mealTime) => <TableCell key={mealTime}>{record.meals.find((meal) => meal.group === group && meal.mealTime === mealTime)?.equivalents ?? '0'}</TableCell>)}<TableCell><strong>{dailyPrescriptionTotals(record.meals).get(group) ?? '0'}</strong></TableCell></TableRow>)}</TableBody></Table></div>
-              <div className="table-frame"><Table aria-label={`Prescripción ${record.month}`}><TableHeader><TableRow><TableHeaderCell>Tiempo</TableHeaderCell><TableHeaderCell>Grupo</TableHeaderCell><TableHeaderCell>Porciones</TableHeaderCell><TableHeaderCell>Indicación</TableHeaderCell><TableHeaderCell>Alimento preferido</TableHeaderCell></TableRow></TableHeader><TableBody>{record.meals.map((meal, index) => <TableRow key={index}><TableCell>{meal.mealTime}</TableCell><TableCell>{groupLabel(meal.group)}</TableCell><TableCell>{meal.equivalents}</TableCell><TableCell>{meal.requirementKind === 'free_guidance' ? 'Libre' : 'Exacta'}{meal.notes && <p className="prescription-note">{meal.notes}</p>}</TableCell><TableCell>{foods.data?.find((food) => food.id === meal.preferredFoodId)?.name ?? (meal.preferredFoodId ? 'Alimento asignado' : 'Sin preferencia')}</TableCell></TableRow>)}</TableBody></Table></div>
+              <div className="table-frame"><Table aria-label={`Totales por día ${record.month}`}><TableHeader><TableRow><TableHeaderCell>Grupo</TableHeaderCell>{mealTimes.map((mealTime) => <TableHeaderCell key={mealTime}>{mealTimeLabel(mealTime)}</TableHeaderCell>)}<TableHeaderCell>Total por día</TableHeaderCell></TableRow></TableHeader><TableBody>{prescriptionFoodGroups.map((group) => <TableRow key={group}><TableCell>{groupLabel(group)}</TableCell>{mealTimes.map((mealTime) => <TableCell key={mealTime}>{record.meals.find((meal) => meal.group === group && meal.mealTime === mealTime)?.equivalents ?? '0'}</TableCell>)}<TableCell><strong>{dailyPrescriptionTotals(record.meals).get(group) ?? '0'}</strong></TableCell></TableRow>)}</TableBody></Table></div>
+              <div className="table-frame"><Table aria-label={`Prescripción ${record.month}`}><TableHeader><TableRow><TableHeaderCell>Tiempo</TableHeaderCell><TableHeaderCell>Grupo</TableHeaderCell><TableHeaderCell>Porciones</TableHeaderCell><TableHeaderCell>Indicación</TableHeaderCell><TableHeaderCell>Alimento preferido</TableHeaderCell></TableRow></TableHeader><TableBody>{record.meals.map((meal, index) => <TableRow key={index}><TableCell>{mealTimeLabel(meal.mealTime)}</TableCell><TableCell>{groupLabel(meal.group)}</TableCell><TableCell>{meal.equivalents}</TableCell><TableCell>{meal.requirementKind === 'free_guidance' ? 'Libre' : 'Exacta'}{meal.notes && <p className="prescription-note">{meal.notes}</p>}</TableCell><TableCell>{foods.data?.find((food) => food.id === meal.preferredFoodId)?.name ?? (meal.preferredFoodId ? 'Alimento asignado' : 'Sin preferencia')}</TableCell></TableRow>)}</TableBody></Table></div>
             </section>
           ))}{prescriptions.data?.length === 0 && <p>No hay prescripciones guardadas para esta persona.</p>}</div>
         )}
       </section>
-      {editor && <form ref={editorRef} className="prescription-editor" onSubmit={savePrescription}>
+      {editor && <form ref={editorRef} className="prescription-editor" noValidate onSubmit={savePrescription}>
         <SectionHeading>{editor.id ? `Editar prescripción ${editor.month}` : 'Nueva prescripción'}</SectionHeading>
         <fieldset disabled={saving} className="prescription-fields">
-          <div className="form-pair"><Field label="Mes de vigencia" required><Input type="month" required value={editor.month} disabled={!!editor.id} onChange={(_event, value) => setEditor({ ...editor, month: value.value, reviewed: false })} /></Field><Field label="Fecha de consulta"><Input type="date" value={editor.indicatedOn} onChange={(_event, value) => setEditor({ ...editor, indicatedOn: value.value, reviewed: false })} /></Field></div>
+          <div className="form-pair"><Field label="Mes de vigencia" required><Input type="month" required value={editor.month} onChange={(_event, value) => setEditor({ ...editor, month: value.value, indicatedOn: editor.indicatedOn.startsWith(`${value.value}-`) ? editor.indicatedOn : '', reviewed: false })} /></Field><Field label="Fecha de consulta"><Input type="date" value={editor.indicatedOn} onChange={(_event, value) => setEditor({ ...editor, indicatedOn: value.value, month: value.value ? value.value.slice(0, 7) : editor.month, reviewed: false })} /></Field></div>
           {editor.meals.map((meal, index) => (
             <div className="prescription-item-editor" key={meal.key}>
-              <Field label={`Tiempo de comida ${index + 1}`} required><Input required value={meal.mealTime} list="meal-times" onChange={(_event, value) => updateMeal(meal.key, { mealTime: value.value })} /></Field>
+              <Field label={`Tiempo de comida ${index + 1}`} required><Select value={meal.mealTime} onChange={(event) => updateMeal(meal.key, { mealTime: event.currentTarget.value })}>{mealTimes.map((mealTime) => <option key={mealTime} value={mealTime}>{mealTimeLabel(mealTime)}</option>)}</Select></Field>
               <Field label={`Grupo ${index + 1}`} required><Select value={meal.group} onChange={(event) => { const group = event.currentTarget.value as MealRow['group']; updateMeal(meal.key, { group, preferredFoodId: null, requirementKind: group === 'Verduras' ? 'free_guidance' : 'exact' }); }}>{prescriptionFoodGroups.map((group) => <option key={group} value={group}>{groupLabel(group)}</option>)}</Select></Field>
               <Field label={`Porciones ${index + 1}`} required><Input type="number" min="0" step="any" required value={meal.equivalents} onChange={(_event, value) => updateMeal(meal.key, { equivalents: value.value })} /></Field>
               <Field label={`Indicación ${index + 1}`}><Select value={meal.requirementKind ?? 'exact'} disabled={meal.group !== 'Verduras'} onChange={(event) => updateMeal(meal.key, { requirementKind: event.currentTarget.value as 'exact' | 'free_guidance' })}><option value="exact">Porciones exactas</option><option value="free_guidance">Verduras libres</option></Select></Field>
@@ -115,10 +121,11 @@ export function PeoplePage() {
               <Button className="remove-prescription-row" type="button" icon={<DeleteRegular />} title={`Eliminar fila ${index + 1}`} aria-label={`Eliminar fila ${index + 1}`} disabled={editor.meals.length === 1} onClick={() => setEditor({ ...editor, reviewed: false, meals: editor.meals.filter((row) => row.key !== meal.key) })} />
             </div>
           ))}
-          <datalist id="meal-times">{mealTimes.map((meal) => <option key={meal} value={meal} />)}</datalist>
           <Button type="button" icon={<AddRegular />} onClick={() => setEditor({ ...editor, reviewed: false, meals: [...editor.meals, emptyMeal()] })}>Añadir indicación</Button>
           <Checkbox checked={editor.reviewed} onChange={(_event, value) => setEditor({ ...editor, reviewed: !!value.checked })} label="Confirmo que todas las indicaciones coinciden con la prescripción" />
-          <div className="action-row action-row-start"><Button type="submit" appearance="primary" icon={<SaveRegular />} disabled={!editor.reviewed}>Guardar prescripción</Button><Button type="button" icon={<DismissRegular />} onClick={() => { setEditor(null); clearMessages(); }}>Cancelar</Button></div>
+          {formError && <p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{formError}</p>}
+          {saving && <p role="status">Guardando prescripción y ajustando recetas...</p>}
+          <div className="action-row action-row-start"><Button type="submit" appearance="primary" icon={<SaveRegular />} disabled={!editor.reviewed || saving}>{saving ? 'Guardando...' : editor.originalMonth && editor.originalMonth !== editor.month ? 'Guardar nueva prescripción' : 'Guardar prescripción'}</Button><Button type="button" icon={<DismissRegular />} onClick={() => { setEditor(null); clearMessages(); }}>Cancelar</Button></div>
         </fieldset>
       </form>}
       <Dialog open={!!toDelete} onOpenChange={(_event, value) => { if (!value.open && !saving) setToDelete(null); }}><DialogSurface><DialogBody><DialogTitle>Eliminar prescripción</DialogTitle><DialogContent>Se eliminarán todas las indicaciones de {toDelete?.month} de {selectedPerson?.name}. Esta acción no se puede deshacer.</DialogContent><DialogActions><Button disabled={saving} icon={<DismissRegular />} onClick={() => setToDelete(null)}>Cancelar</Button><Button disabled={saving} appearance="primary" icon={<DeleteRegular />} onClick={deletePrescription}>{saving ? 'Eliminando...' : 'Eliminar prescripción'}</Button></DialogActions></DialogBody></DialogSurface></Dialog>

@@ -38,20 +38,22 @@ function canonicalUnit(unit: string): string {
 }
 
 type RecipeDatabase = Pick<ReturnType<typeof getPool>, 'query'>;
+type RecipeCatalogFood = { id: string; group: string; baseQuantity: string | null; unit: string | null; isFreeConsumption: boolean; portionPending: boolean; verifiedAt: string | Date | null };
+type RecipeValidationContext = { foods: Map<string, RecipeCatalogFood>; prescription: PrescriptionRow[] };
 
-async function validateRecipeForProfile(input: RecipeEdit, pool: RecipeDatabase = getPool()): Promise<void> {
-  if (input.personId !== null) {
+async function validateRecipeForProfile(input: RecipeEdit, pool: RecipeDatabase = getPool(), context?: RecipeValidationContext): Promise<void> {
+  if (input.personId !== null && !context) {
     const person = await pool.query('SELECT id FROM foodhelp.people WHERE id = $1', [input.personId]);
     if (!person.rowCount) throw new ApiError(404, 'NOT_FOUND', 'Persona seleccionada no encontrada.');
   }
 
   const ids = input.ingredients.map((ingredient) => ingredient.foodId);
-  const foodsResult = ids.length ? await pool.query(
+  const foodsResult = !context && ids.length ? await pool.query<RecipeCatalogFood>(
     `SELECT id, name, food_group AS "group", base_quantity AS "baseQuantity", unit,
             is_free_consumption AS "isFreeConsumption", portion_pending AS "portionPending", verified_at AS "verifiedAt"
      FROM foodhelp.foods WHERE id = ANY($1::uuid[])`, [ids],
   ) : { rows: [] };
-  const foods = new Map(foodsResult.rows.map((food) => [food.id as string, food]));
+  const foods = context?.foods ?? new Map(foodsResult.rows.map((food) => [food.id, food]));
   for (const ingredient of input.ingredients) {
     const food = foods.get(ingredient.foodId);
     if (!food || !food.verifiedAt || food.portionPending || food.group !== ingredient.group || food.isFreeConsumption !== ingredient.isFreeConsumption) {
@@ -67,7 +69,7 @@ async function validateRecipeForProfile(input: RecipeEdit, pool: RecipeDatabase 
   if (!input.verify) return;
   if (input.reviewNotes.length) throw new ApiError(422, 'VALIDATION_ERROR', 'Resuelve o elimina los pendientes antes de verificar la receta.');
   if (input.personId === null) return;
-  const prescription = await pool.query<{ group: string; equivalents: string; requirementKind: string }>(
+  const prescription = context ? { rows: context.prescription, rowCount: context.prescription.length } : await pool.query<PrescriptionRow>(
     `SELECT pi.food_group AS "group", pi.equivalents::text AS equivalents, pi.requirement_kind AS "requirementKind"
      FROM foodhelp.prescription_items pi JOIN foodhelp.prescriptions pr ON pr.id = pi.prescription_id
      WHERE pr.person_id = $1 AND pr.reviewed_at IS NOT NULL
@@ -124,10 +126,13 @@ async function synchronizeRecipes(personId: string, pool: RecipeDatabase = getPo
   );
   const summary = { identical: 0, proportional: 0, different: 0, verified: 0, drafts: 0 };
   const foodIds = [...new Set(recipes.rows.flatMap((recipe) => (recipe.ingredients as RecipeEdit['ingredients']).map((ingredient) => ingredient.foodId)))];
-  const foodResult = foodIds.length ? await pool.query<{ id: string; baseQuantity: string | null }>(
-    'SELECT id, base_quantity AS "baseQuantity" FROM foodhelp.foods WHERE id = ANY($1::uuid[])', [foodIds],
+  const foodResult = foodIds.length ? await pool.query<RecipeCatalogFood>(
+    `SELECT id, food_group AS "group", base_quantity AS "baseQuantity", unit,
+      is_free_consumption AS "isFreeConsumption", portion_pending AS "portionPending", verified_at AS "verifiedAt"
+     FROM foodhelp.foods WHERE id = ANY($1::uuid[])`, [foodIds],
   ) : { rows: [] };
   const baseFoods = new Map(foodResult.rows.map((food) => [food.id, food]));
+  const edits: (RecipeEdit & { baseRecipeId: string })[] = [];
   for (const recipe of recipes.rows) {
     const sourceRows = prescriptionFromIngredients(recipe.ingredients as RecipeEdit['ingredients'], baseFoods);
     const plan = planInheritance(sourceRows, targetRows.get(recipe.mealTime) ?? [], recipe.ingredients as RecipeEdit['ingredients']);
@@ -141,27 +146,34 @@ async function synchronizeRecipes(personId: string, pool: RecipeDatabase = getPo
     };
     if (edit.verify) {
       try {
-        await validateRecipeForProfile(edit, pool);
+        await validateRecipeForProfile(edit, pool, { foods: baseFoods, prescription: targetRows.get(recipe.mealTime) ?? [] });
       } catch (error) {
         edit.verify = false;
         edit.reviewNotes = [...edit.reviewNotes, error instanceof Error ? error.message : 'Revisa las equivalencias heredadas.'];
       }
     }
+    edits.push({ ...edit, baseRecipeId: recipe.id });
+    summary[edit.verify ? 'verified' : 'drafts'] += 1;
+  }
+  if (edits.length) {
     await pool.query(
       `INSERT INTO foodhelp.recipes
          (person_id, name, meal_time, source_text, review_notes, instructions, ingredients, verified_at,
           image_url, image_attribution, image_license, inherited_from_recipe_id)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, CASE WHEN $8 THEN now() ELSE NULL END, $9, $10, $11, $12)
+       SELECT $1::uuid, copy.name, copy."mealTime", copy."sourceText", copy."reviewNotes", copy.instructions,
+         copy.ingredients, CASE WHEN copy.verify THEN now() ELSE NULL END, copy."imageUrl", copy."imageAttribution",
+         copy."imageLicense", copy."baseRecipeId"
+       FROM jsonb_to_recordset($2::jsonb) AS copy(
+         name text, "mealTime" text, "sourceText" text, "reviewNotes" text[], instructions jsonb,
+         ingredients jsonb, verify boolean, "imageUrl" text, "imageAttribution" text, "imageLicense" text, "baseRecipeId" uuid)
        ON CONFLICT (person_id, inherited_from_recipe_id) WHERE inherited_from_recipe_id IS NOT NULL
        DO UPDATE SET name = EXCLUDED.name, meal_time = EXCLUDED.meal_time,
          source_text = EXCLUDED.source_text, review_notes = EXCLUDED.review_notes,
          instructions = EXCLUDED.instructions, ingredients = EXCLUDED.ingredients,
          verified_at = EXCLUDED.verified_at, image_url = EXCLUDED.image_url,
          image_attribution = EXCLUDED.image_attribution, image_license = EXCLUDED.image_license`,
-      [personId, edit.name, edit.mealTime, edit.sourceText, edit.reviewNotes, JSON.stringify(edit.instructions), JSON.stringify(edit.ingredients),
-        edit.verify, edit.imageUrl ?? null, edit.imageAttribution ?? null, edit.imageLicense ?? null, recipe.id],
+      [personId, JSON.stringify(edits)],
     );
-    summary[edit.verify ? 'verified' : 'drafts'] += 1;
   }
   return { copied: recipes.rowCount ?? 0, ...summary };
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button, Card, Checkbox, Dialog, DialogActions, DialogBody, DialogContent, DialogSurface, DialogTitle, Field, Input, MessageBar, MessageBarBody, Select, Textarea } from '@fluentui/react-components';
 import { AddRegular, BookmarkRegular, DeleteRegular, DismissRegular, EditRegular, EyeRegular, SaveRegular } from '@fluentui/react-icons';
-import { foodGroups, freeFoodGroups, mealTimes, recipeEditSchema, type Food, type FoodGroup, type Person, type RecipeEdit } from '@foodhelp/contracts';
+import { foodGroups, freeFoodGroups, mealTimeLabel, mealTimes, recipeEditSchema, type Food, type FoodGroup, type Person, type RecipeEdit } from '@foodhelp/contracts';
 import { api } from '../api';
 import type { RecipeDetail, RecipeIngredient, RecipeMatch, RecipeSummary } from '../api/types';
 import { PageFrame, SectionHeading } from '../components/PageFrame';
@@ -187,7 +187,7 @@ export function RecipesPage() {
           <Card appearance="outline" key={recipe.id} className="recipe-row">
             {recipe.imageUrl && <img className="recipe-thumbnail" src={thumbnailUrl(recipe.imageUrl)} alt={recipe.name} width={76} height={64} loading="lazy" decoding="async" />}
             <BookmarkRegular aria-hidden="true" />
-            <div className="recipe-summary"><strong>{recipe.name}</strong><p>{recipe.personName ?? 'Recetas base'} · {recipe.mealTime ?? 'Sin tiempo asignado'}</p><span className={`status-pill ${recipe.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{recipe.verifiedAt ? 'Verificada' : 'Borrador pendiente de revisión'}</span></div>
+            <div className="recipe-summary"><strong>{recipe.name}</strong><p>{recipe.personName ?? 'Recetas base'} · {mealTimeLabel(recipe.mealTime ?? 'Sin tiempo asignado')}</p><span className={`status-pill ${recipe.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{recipe.verifiedAt ? 'Verificada' : 'Borrador pendiente de revisión'}</span></div>
             <Button appearance="secondary" icon={<EyeRegular />} onClick={() => setSelectedId(recipe.id)}>Ver detalle</Button>
           </Card>
         ))}</div>
@@ -196,7 +196,7 @@ export function RecipesPage() {
         <SectionHeading detail="Primero se buscan recetas ya guardadas">Buscar por antojo</SectionHeading>
         <form className="recipe-discovery-form" onSubmit={findMatches}>
           <Field label="Persona" required><Select value={activeDiscoveryPerson?.id ?? ''} onChange={(event) => { setDiscoveryPersonId(event.currentTarget.value); setMatches([]); setHasSearched(false); }} required>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
-          <Field label="Tiempo de comida" required><Select value={discoveryMealTime} onChange={(event) => { setDiscoveryMealTime(event.currentTarget.value as typeof discoveryMealTime); setMatches([]); setHasSearched(false); }}>{mealTimes.map((mealTime) => <option key={mealTime}>{mealTime}</option>)}</Select></Field>
+          <Field label="Tiempo de comida" required><Select value={discoveryMealTime} onChange={(event) => { setDiscoveryMealTime(event.currentTarget.value as typeof discoveryMealTime); setMatches([]); setHasSearched(false); }}>{mealTimes.map((mealTime) => <option key={mealTime} value={mealTime}>{mealTimeLabel(mealTime)}</option>)}</Select></Field>
           <fieldset className="main-food-picker" disabled={discoveryBusy}>
             <legend>Ingredientes principales</legend>
             {mainIngredients.map((ingredient, index) => (
@@ -213,7 +213,7 @@ export function RecipesPage() {
         </form>
         {discoveryError && <p className="form-error" role="alert">{discoveryError}</p>}
         {discoveryMessage && <p className="form-success" role="status">{discoveryMessage}</p>}
-        {hasSearched && matches.length > 0 && <div className="recipe-match-list"><SectionHeading detail="Ordenadas por ingredientes principales en común">Coincidencias guardadas</SectionHeading>{matches.map((match) => <Card appearance="outline" className="recipe-row" key={match.id}><BookmarkRegular aria-hidden="true"/><div className="recipe-summary"><strong>{match.name}</strong><p>{match.personName} · {match.mealTime} · {match.matchCount} ingrediente(s) en común</p><span className={`status-pill ${match.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{match.verifiedAt ? 'Verificada' : 'Borrador pendiente'}</span></div><Button appearance="secondary" icon={<EyeRegular />} onClick={() => setSelectedId(match.id)}>Ver detalle</Button></Card>)}</div>}
+        {hasSearched && matches.length > 0 && <div className="recipe-match-list"><SectionHeading detail="Ordenadas por ingredientes principales en común">Coincidencias guardadas</SectionHeading>{matches.map((match) => <Card appearance="outline" className="recipe-row" key={match.id}><BookmarkRegular aria-hidden="true"/><div className="recipe-summary"><strong>{match.name}</strong><p>{match.personName} · {mealTimeLabel(match.mealTime ?? '')} · {match.matchCount} ingrediente(s) en común</p><span className={`status-pill ${match.verifiedAt ? 'status-confirmed' : 'status-pending'}`}>{match.verifiedAt ? 'Verificada' : 'Borrador pendiente'}</span></div><Button appearance="secondary" icon={<EyeRegular />} onClick={() => setSelectedId(match.id)}>Ver detalle</Button></Card>)}</div>}
         {hasSearched && matches.length === 0 && !discoveryError && <MessageBar intent="info"><MessageBarBody>No hay recetas guardadas que coincidan con esos ingredientes y ese tiempo de comida.</MessageBarBody></MessageBar>}
         {hasSearched && <div className="recipe-ai-action"><p>Si quieres una opción nueva, la IA propondrá tres recetas. Solo se guardarán las que respeten exactamente la prescripción, los alimentos elegidos y sus unidades.</p><Button appearance="secondary" icon={<AddRegular />} disabled={!activeDiscoveryPerson || !mainIngredientsComplete || discoveryBusy} onClick={generateRecipes}>{discoveryAction === 'generate' ? 'Generando y verificando...' : 'Generar 3 recetas nuevas'}</Button></div>}
       </section>
@@ -225,7 +225,7 @@ export function RecipesPage() {
               <form id="recipe-editor" className="recipe-editor" noValidate onSubmit={saveEditor}>
                 <Field label="Nombre" required><Input required maxLength={160} value={editor.name} onChange={(_event, value) => setEditor({ ...editor, name: value.value, verify: false })} /></Field>
                 <Field label="Perfil"><Select value={editor.personId ?? ''} onChange={(event) => setEditor({ ...editor, personId: event.currentTarget.value || null, verify: false })}><option value="">Recetas base</option>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
-                <Field label="Tiempo de comida" required><Select value={editor.mealTime} onChange={(event) => setEditor({ ...editor, mealTime: event.currentTarget.value as RecipeEdit['mealTime'], verify: false })}>{mealTimes.map((mealTime) => <option key={mealTime}>{mealTime}</option>)}</Select></Field>
+                <Field label="Tiempo de comida" required><Select value={editor.mealTime} onChange={(event) => setEditor({ ...editor, mealTime: event.currentTarget.value as RecipeEdit['mealTime'], verify: false })}>{mealTimes.map((mealTime) => <option key={mealTime} value={mealTime}>{mealTimeLabel(mealTime)}</option>)}</Select></Field>
                 <Field label="Propuesta original" required><Textarea required resize="vertical" value={editor.sourceText} onChange={(_event, value) => setEditor({ ...editor, sourceText: value.value, verify: false })} /></Field>
                 <Field label="URL de imagen"><Input inputMode="url" value={editor.imageUrl ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageUrl: value.value || null, verify: false })} placeholder="/images/recipes/... o https://..." /></Field>
                 <Field label="Fuente / autor de imagen"><Input value={editor.imageAttribution ?? ''} onChange={(_event, value) => setEditor({ ...editor, imageAttribution: value.value || null, verify: false })} placeholder="Fuente o autor de la imagen" /></Field>
@@ -249,7 +249,7 @@ export function RecipesPage() {
                 </section>
                 <section className="recipe-steps-editor"><h3>Preparación</h3>{editor.instructions.map((instruction, index) => <div className="recipe-ingredient-row" key={index}><Field label={`Paso ${index + 1}`} required><Input required value={instruction} onChange={(_event, value) => setEditor({ ...editor, verify: false, instructions: editor.instructions.map((step, stepIndex) => stepIndex === index ? value.value : step) })} /></Field><Button type="button" icon={<DeleteRegular />} aria-label={`Quitar paso ${index + 1}`} title="Quitar paso" onClick={() => setEditor({ ...editor, verify: false, instructions: editor.instructions.filter((_step, stepIndex) => stepIndex !== index) })} /></div>)}<Button type="button" icon={<AddRegular />} onClick={() => setEditor({ ...editor, verify: false, instructions: [...editor.instructions, ''] })}>Añadir paso</Button></section>
                 {prescriptionsError && <p role="alert" className="form-error">No se pudo cargar la prescripción del perfil seleccionado.</p>}
-                {editor.personId !== null && !prescriptionsBusy && !currentPrescription && <MessageBar intent="warning"><MessageBarBody>No hay una prescripción guardada para {editor.mealTime} en el perfil seleccionado.</MessageBarBody></MessageBar>}
+                {editor.personId !== null && !prescriptionsBusy && !currentPrescription && <MessageBar intent="warning"><MessageBarBody>No hay una prescripción guardada para {mealTimeLabel(editor.mealTime)} en el perfil seleccionado.</MessageBarBody></MessageBar>}
                 {missingGroups.length > 0 && <MessageBar intent="warning"><MessageBarBody>Falta añadir ingredientes de estos tipos prescritos: {missingGroups.map((group) => group === 'Proteinas' ? 'Proteínas' : group === 'Lacteos' ? 'Lácteos' : group).join(', ')}.</MessageBarBody></MessageBar>}
                 {editor.reviewNotes.length > 0 && <MessageBar intent="warning"><MessageBarBody>Resuelve las notas pendientes antes de verificar esta receta.</MessageBarBody></MessageBar>}
                 <Checkbox checked={editor.verify} disabled={!canVerify} onChange={(_event, value) => setEditor({ ...editor, verify: Boolean(value.checked) })} label={editor.personId === null ? 'Validar ingredientes de la receta base' : 'Verificar equivalencias contra la prescripción actual'} />
@@ -258,7 +258,7 @@ export function RecipesPage() {
               </form>
             ) : detailBusy ? <p role="status">Cargando receta...</p> : detailError ? <p role="alert" className="form-error">{detailError}</p> : detail && (
               <>
-                <p>{detail.personName ?? 'Recetas base'} · {detail.mealTime}</p>
+                <p>{detail.personName ?? 'Recetas base'} · {mealTimeLabel(detail.mealTime ?? '')}</p>
                 {detail.imageUrl && <figure className="recipe-image"><img src={detail.imageUrl} alt={detail.name} /><figcaption>{detail.imageAttribution ? <a href={detail.imageAttribution} target="_blank" rel="noreferrer">Fuente de la imagen</a> : 'Imagen de receta'}{detail.imageLicense ? ` · ${detail.imageLicense}` : ''}</figcaption></figure>}
                 {!detail.verifiedAt && <MessageBar intent="warning"><MessageBarBody>Borrador no disponible en listas hasta completar ingredientes y verificar equivalencias.</MessageBarBody></MessageBar>}
                 {detail.sourceText && <section><h3>Propuesta original</h3><p className="recipe-source">{detail.sourceText}</p></section>}

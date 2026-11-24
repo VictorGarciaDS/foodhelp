@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { calculateEquivalentSchema, createFoodSchema, foodPurchaseUnitsSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema, withZeroColacion } from './index';
+import { calculateEquivalentSchema, createFoodSchema, foodPurchaseUnitsSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema, withZeroColacion, mealTimeLabel } from './index';
 
 describe('shared request contracts', () => {
+  it('uses fixed prescription meal times and an accented snack label', () => {
+    const prescription = { month: '2026-12', reviewed: true, indicatedOn: '2026-12-03', meals: [{ mealTime: 'Colacion', group: 'Frutas', equivalents: '0' }] };
+    expect(prescriptionSchema.safeParse(prescription).success).toBe(true);
+    expect(prescriptionSchema.safeParse({ ...prescription, meals: [{ ...prescription.meals[0], mealTime: 'Texto libre' }] }).success).toBe(false);
+    expect(mealTimeLabel('Colacion')).toBe('Colación');
+  });
   it('adds seven zero snack groups without replacing existing values', () => {
     const rows = withZeroColacion([{ mealTime: 'Colacion', group: 'Frutas', equivalents: '1' }]);
     expect(rows).toHaveLength(7);
