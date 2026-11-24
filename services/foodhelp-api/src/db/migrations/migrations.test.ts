@@ -6,6 +6,14 @@ import { describe, expect, it } from 'vitest';
 const schema = readFileSync(resolve(__dirname, '0001_foodhelp_schema.sql'), 'utf8');
 
 describe('foodhelp schema migration', () => {
+  it('protects catalog equivalences while allowing explicitly authorized maintenance', () => {
+    const migration = readFileSync(resolve(__dirname, '0019_protect_food_equivalences.sql'), 'utf8');
+    expect(migration).toContain('CREATE UNIQUE INDEX foods_normalized_name_idx');
+    expect(migration).toContain('BEFORE UPDATE OF food_group, base_quantity, unit, is_free_consumption');
+    expect(migration).toContain("current_setting('foodhelp.authorize_equivalence_change', true)");
+    expect(migration).toContain("ERRCODE = '42501'");
+    expect(migration).not.toContain('UPDATE foodhelp.foods SET');
+  });
   it('uses the confirmed Habits tablespoon weight and an exact one-kilogram package ratio', () => {
     const migration = readFileSync(resolve(__dirname, '0017_remaining_confirmed_purchase_units.sql'), 'utf8');
     expect(migration).toContain("'cucharadas', '30.5', 'g'");

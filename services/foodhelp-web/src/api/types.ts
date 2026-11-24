@@ -26,7 +26,7 @@ export interface ApiClient {
   createFood(input: CreateFood): Promise<Food>;
   setFoodPurchaseUnits(foodId: string, purchaseUnits: FoodPurchaseUnit[]): Promise<FoodPurchaseUnit[]>;
   listPeople(): Promise<Person[]>;
-  createPerson(name: string, basePersonId?: string | null): Promise<Person>;
+  createPerson(name: string): Promise<Person>;
   inheritRecipes(personId: string, basePersonId: string | null): Promise<RecipeInheritanceResult>;
   listPrescriptions(personId: string): Promise<PrescriptionRecord[]>;
   savePrescription(personId: string, input: PrescriptionInput): Promise<RecipeInheritanceResult | { error: string } | null>;

@@ -4,6 +4,13 @@ import { api } from './index';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('cliente API same-origin', () => {
+  it('creates profiles without a manual recipe inheritance source', async () => {
+    const person = { id: 'person-id', name: 'Nuevo', prescriptionComplete: false };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ person, inheritance: { copied: 2, drafts: 2 } }), { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.createPerson('Nuevo')).resolves.toEqual(person);
+    expect(fetchMock).toHaveBeenCalledWith('/api/people', expect.objectContaining({ method: 'POST', body: JSON.stringify({ name: 'Nuevo' }) }));
+  });
   it('lists and deletes prescriptions using the selected person and CSRF header', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ prescriptions: [] }), { status: 200 }))

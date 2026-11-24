@@ -12,7 +12,9 @@ describe('catalog and prescription routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     database.query.mockResolvedValue({ rows: [{ baseQuantity: '4', unit: 'pieza', isFreeConsumption: false, verifiedAt: '2026-10-05T12:00:00.000Z' }], rowCount: 1 });
-    database.transactionQuery.mockResolvedValue({ rows: [{ id: '00000000-0000-4000-8000-000000000002', group: 'Lacteos' }], rowCount: 1 });
+    database.transactionQuery.mockImplementation(async (sql: string) => sql.includes('FROM foodhelp.recipes r')
+      ? { rows: [], rowCount: 0 }
+      : { rows: [{ id: '00000000-0000-4000-8000-000000000002', group: 'Lacteos' }], rowCount: 1 });
   });
 
   afterEach(async () => {
@@ -40,25 +42,100 @@ describe('catalog and prescription routes', () => {
     return request('/equivalents/calculate', 'POST', { foodId: '00000000-0000-4000-8000-000000000001', quantity: '2', unit });
   }
 
+  it('creates a profile with base copies in draft without requiring a source profile or prescription', async () => {
+    const personId = '00000000-0000-4000-8000-000000000001';
+    const foodId = '00000000-0000-4000-8000-000000000002';
+    const baseId = '00000000-0000-4000-8000-000000000003';
+    const ingredients = [{ foodId, quantity: '90', unit: 'g', group: 'Proteinas', isFreeConsumption: false }];
+    database.transactionQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('INSERT INTO foodhelp.people') || sql.includes('SELECT id FROM foodhelp.people')) return { rows: [{ id: personId, name: 'Nuevo' }], rowCount: 1 };
+      if (sql.includes('FROM foodhelp.recipes r')) return { rows: [{ id: baseId, name: 'Base', mealTime: 'Comida', instructions: ['Cocinar'], ingredients, reviewNotes: [], verifiedAt: '2026-10-05T12:00:00Z' }], rowCount: 1 };
+      if (sql.includes('FROM foodhelp.foods')) return { rows: [{ id: foodId, baseQuantity: '30' }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+    const response = await request('/people', 'POST', { name: 'Nuevo' });
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({ person: { id: personId, prescriptionComplete: false }, inheritance: { copied: 1, verified: 0, drafts: 1 } });
+    const insert = database.transactionQuery.mock.calls.find(([sql]) => sql.includes('INSERT INTO foodhelp.recipes'))!;
+    expect(JSON.parse(insert[1][6])).toEqual(ingredients);
+    expect(insert[1][7]).toBe(false);
+    expect(insert[1][11]).toBe(baseId);
+    expect(database.query).not.toHaveBeenCalled();
+    expect(database.transactionQuery.mock.calls.at(-1)?.[0]).toBe('COMMIT');
+  });
+
+  it.each(['2', '4'])('recalculates existing copies directly from bases when the prescription becomes %s portions', async (equivalents) => {
+    const personId = '00000000-0000-4000-8000-000000000001';
+    const foodId = '00000000-0000-4000-8000-000000000002';
+    const baseId = '00000000-0000-4000-8000-000000000003';
+    const ingredients = [{ foodId, quantity: '90', unit: 'g', group: 'Proteinas', isFreeConsumption: false }];
+    const catalogFood = { id: foodId, group: 'Proteinas', baseQuantity: '30', unit: 'g', isFreeConsumption: false, portionPending: false, verifiedAt: '2026-10-05T12:00:00Z' };
+    database.transactionQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM foodhelp.people')) return { rows: [{ id: personId, basePersonId: baseId }], rowCount: 1 };
+      if (sql.includes('INSERT INTO foodhelp.prescriptions')) return { rows: [{ id: personId }], rowCount: 1 };
+      if (sql.includes('FROM foodhelp.recipes r')) return { rows: [{ id: baseId, name: 'Base', mealTime: 'Comida', instructions: ['Cocinar'], ingredients, reviewNotes: [], verifiedAt: '2026-10-05T12:00:00Z' }], rowCount: 1 };
+      if (sql.includes('FROM foodhelp.foods')) return { rows: [catalogFood], rowCount: 1 };
+      if (sql.includes('FROM foodhelp.prescription_items')) return { rows: [{ mealTime: 'Comida', group: 'Proteinas', equivalents, requirementKind: 'exact' }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    });
+    const response = await request(`/people/${personId}/prescription`, 'PUT', {
+      month: '2026-11', reviewed: true, meals: [{ mealTime: 'Comida', group: 'Proteinas', equivalents }],
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ inheritance: { copied: 1, verified: 1 } });
+    const insert = database.transactionQuery.mock.calls.find(([sql]) => sql.includes('INSERT INTO foodhelp.recipes'))!;
+    expect(JSON.parse(insert[1][6])).toEqual([{ ...ingredients[0], quantity: String(Number(equivalents) * 30) }]);
+    expect(insert[0]).toContain('DO UPDATE SET');
+    expect(ingredients[0].quantity).toBe('90');
+    expect(database.transactionQuery.mock.calls.some(([sql]) => /(?:UPDATE|INSERT INTO) foodhelp\.foods/.test(sql))).toBe(false);
+    expect(database.query).not.toHaveBeenCalled();
+  });
+
+  it('rolls back prescription changes if synchronizing the recipes fails', async () => {
+    const implementation = database.transactionQuery.getMockImplementation()!;
+    database.transactionQuery.mockImplementation(async (sql: string, values: unknown[]) => {
+      if (sql.includes('FROM foodhelp.recipes r')) throw new Error('Synchronizing failed');
+      return implementation(sql, values);
+    });
+    const response = await request('/people/00000000-0000-4000-8000-000000000001/prescription', 'PUT', {
+      month: '2026-11', reviewed: true, meals: [{ mealTime: 'Comida', group: 'Proteinas', equivalents: '2' }],
+    });
+    expect(response.status).toBe(500);
+    expect(database.transactionQuery).toHaveBeenCalledWith('ROLLBACK');
+    expect(database.transactionQuery).not.toHaveBeenCalledWith('COMMIT');
+  });
+
+  it('rejects a duplicate food instead of introducing a replacement equivalence', async () => {
+    database.query.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    const response = await request('/foods', 'POST', { name: 'Alimento existente', group: 'Proteinas', baseQuantity: '999', unit: 'g', isFreeConsumption: false, verified: true });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: { code: 'CONFLICT' } });
+    expect(database.query.mock.calls[0][0]).toContain('ON CONFLICT DO NOTHING');
+    expect(database.query.mock.calls.some(([sql]) => sql.includes('UPDATE foodhelp.foods'))).toBe(false);
+  });
+
   it('copies an independent base proportionally and verifies it against the target prescription', async () => {
     const personId = '00000000-0000-4000-8000-000000000001';
     const foodId = '00000000-0000-4000-8000-000000000002';
     const recipeId = '00000000-0000-4000-8000-000000000003';
     const ingredient = { foodId, quantity: '30', unit: 'g', group: 'Proteinas', isFreeConsumption: false };
     const catalogFood = { id: foodId, group: 'Proteinas', baseQuantity: '30', unit: 'g', isFreeConsumption: false, portionPending: false, verifiedAt: '2026-10-05T12:00:00Z' };
-    database.query.mockResolvedValueOnce({ rows: [{ id: personId }], rowCount: 1 });
-    database.query.mockResolvedValueOnce({ rows: [{ mealTime: 'Comida', group: 'Proteinas', equivalents: '2', requirementKind: 'exact' }], rowCount: 1 });
-    database.query.mockResolvedValueOnce({ rows: [{ id: recipeId, name: 'Base', mealTime: 'Comida', sourceText: 'Base', reviewNotes: [], instructions: ['Cocinar'], ingredients: [ingredient], verifiedAt: '2026-10-05T12:00:00Z' }], rowCount: 1 });
-    database.query.mockResolvedValueOnce({ rows: [catalogFood], rowCount: 1 });
-    database.query.mockResolvedValueOnce({ rows: [{ id: personId }], rowCount: 1 });
-    database.query.mockResolvedValueOnce({ rows: [catalogFood], rowCount: 1 });
-    database.query.mockResolvedValueOnce({ rows: [{ group: 'Proteinas', equivalents: '2', requirementKind: 'exact' }], rowCount: 1 });
-    database.query.mockResolvedValueOnce({ rows: [], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [{ id: personId }], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [{ mealTime: 'Comida', group: 'Proteinas', equivalents: '2', requirementKind: 'exact' }], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [{ id: recipeId, name: 'Base', mealTime: 'Comida', sourceText: 'Base', reviewNotes: [], instructions: ['Cocinar'], ingredients: [ingredient], verifiedAt: '2026-10-05T12:00:00Z' }], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [catalogFood], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [{ id: personId }], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [catalogFood], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [{ group: 'Proteinas', equivalents: '2', requirementKind: 'exact' }], rowCount: 1 });
+    database.transactionQuery.mockResolvedValueOnce({ rows: [], rowCount: 1 });
     const response = await request(`/people/${personId}/inherit-recipes`, 'POST', { basePersonId: null });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({ inheritance: { copied: 1, proportional: 1, verified: 1 } });
-    expect(JSON.parse(database.query.mock.calls[7][1][6])).toEqual([{ ...ingredient, quantity: '60' }]);
-    expect(database.query.mock.calls[7][1][11]).toBe(recipeId);
+    expect(JSON.parse(database.transactionQuery.mock.calls[8][1][6])).toEqual([{ ...ingredient, quantity: '60' }]);
+    expect(database.transactionQuery.mock.calls[8][1][11]).toBe(recipeId);
+    expect(database.transactionQuery.mock.calls[8][0]).toContain('DO UPDATE SET');
+    expect(database.transactionQuery.mock.calls.at(-1)?.[0]).toBe('COMMIT');
   });
 
   it('loads complete monthly prescriptions for the selected person', async () => {
@@ -108,7 +185,8 @@ describe('catalog and prescription routes', () => {
     database.query.mockResolvedValueOnce({ rows: [{ id: prescriptionId }], rowCount: 1 });
     const response = await request(`/people/${personId}/prescriptions/${prescriptionId}`, 'DELETE');
     expect(response.status).toBe(204);
-    expect(database.query).toHaveBeenCalledWith(expect.stringContaining('AND person_id = $2'), [prescriptionId, personId]);
+      expect(database.transactionQuery).toHaveBeenCalledWith(expect.stringContaining('AND person_id = $2'), [prescriptionId, personId]);
+      expect(database.transactionQuery.mock.calls.at(-1)?.[0]).toBe('COMMIT');
   });
 
   it('saves package conversions for a catalog food transactionally', async () => {

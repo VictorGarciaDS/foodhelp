@@ -59,7 +59,7 @@ export const api: ApiClient = {
 		return (await requestJson<{ purchaseUnits: FoodPurchaseUnit[] }>(`/foods/${foodId}/purchase-units`, { method: 'PUT', body: JSON.stringify({ purchaseUnits }) })).purchaseUnits;
 	},
 	async listPeople() { return (await requestJson<{ people: Person[] }>('/people')).people; },
-	async createPerson(name, basePersonId) { return (await requestJson<{ person: Person }>('/people', { method: 'POST', body: JSON.stringify({ name, basePersonId: basePersonId || null }) })).person; },
+	async createPerson(name) { return (await requestJson<{ person: Person }>('/people', { method: 'POST', body: JSON.stringify({ name }) })).person; },
 	async inheritRecipes(personId, basePersonId) {
 		return (await requestJson<{ inheritance: RecipeInheritanceResult }>(`/people/${personId}/inherit-recipes`, { method: 'POST', body: JSON.stringify({ basePersonId }) })).inheritance;
 	},

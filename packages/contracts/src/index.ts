@@ -63,7 +63,6 @@ export const personSchema = z.object({
 });
 export const createPersonSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  basePersonId: z.string().uuid().nullable().optional(),
 });
 export const inheritRecipesSchema = z.object({ basePersonId: z.string().uuid().nullable() });
 export const prescriptionSchema = z.object({
