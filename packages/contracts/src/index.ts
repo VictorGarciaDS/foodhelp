@@ -41,6 +41,7 @@ export const foodPurchaseUnitsSchema = z.object({ purchaseUnits: z.array(purchas
 });
 export const foodSchema = foodPortionSchema.extend({
   id: z.string().uuid(), name: z.string(), verifiedAt: z.string().datetime().nullable(),
+  purchaseLocation: z.enum(['Mercado', 'Naturista', 'Supermercado']).optional(),
   purchaseUnits: z.array(purchaseUnitSchema).max(10).default([]),
   imageUrl: z.string().nullable().optional(),
   imageAttribution: z.string().nullable().optional(),

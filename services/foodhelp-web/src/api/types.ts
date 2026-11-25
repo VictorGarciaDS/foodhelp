@@ -12,7 +12,7 @@ type ShoppingMeals = { mealTime: (typeof mealTimes)[number]; recipeIds: string[]
 export type ShoppingPlan = { days: number; daysPerDish?: number; peopleCount: number; participants: { personId: string; meals: ShoppingMeals }[] }
   | { days: number; daysPerDish?: number; meals: ShoppingMeals; participants?: { personId: string; peopleCount?: number }[] };
 export type GeneratedShoppingList = { days: number; participantCount: number; peopleCount: number; participants: { personId: string; personName?: string; peopleCount?: number; days: number }[]; usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[]; items: ShoppingItem[] };
-export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string; purchaseOptions: { unitName: string; quantity: string; contents: string; unit: string; purchaseUnit: string; isApproximate: boolean }[]; purchasePending: boolean };
+export type ShoppingItem = { foodId: string; name: string; unit: string; quantity: string; purchaseLocation?: 'Mercado' | 'Naturista' | 'Supermercado'; purchaseOptions: { unitName: string; quantity: string; contents: string; unit: string; purchaseUnit: string; isApproximate: boolean }[]; purchasePending: boolean };
 export type FoodPurchaseUnit = Food['purchaseUnits'][number];
 export type RecipeInheritanceResult = { copied: number; identical: number; proportional: number; different: number; verified: number; drafts: number };
 export type PrescriptionInput = {

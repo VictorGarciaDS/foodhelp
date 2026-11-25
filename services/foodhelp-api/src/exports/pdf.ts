@@ -14,13 +14,14 @@ export function streamPdf(response: Response, title: string, rows: string[]): vo
 
 type ShoppingPdfItem = {
   name: string; group: string; unit: string; quantity: string; purchasePending: boolean;
+  purchaseLocation?: string;
   purchaseOptions: { quantity: string; purchaseUnit: string; isApproximate: boolean }[];
 };
 export type ShoppingPdfData = {
   personName: string; days: number; peopleCount: number;
   participants?: { personName?: string; peopleCount?: number }[];
-  menu: { day: number; mealTime: string; recipeName: string }[];
-  recipes: { id: string; name: string; mealTime: string; instructions: string[]; personName?: string }[];
+  menu: { day: number; mealTime: string; recipeName: string; recipeId?: string }[];
+  recipes: { id: string; name: string; mealTime: string; instructions: string[]; personName?: string; baseRecipeId?: string | null; baseName?: string }[];
   items: ShoppingPdfItem[];
 };
 
@@ -65,10 +66,18 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
   }
   doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(13).text('Menú', left);
   doc.moveDown(0.4);
-  for (const day of [...new Set(data.menu.map((entry) => entry.day))]) {
+  const menuGroups: { firstDay: number; lastDay: number; signature: string; entries: ShoppingPdfData['menu'] }[] = [];
+  for (const day of [...new Set(data.menu.map((entry) => entry.day))].sort((leftDay, rightDay) => leftDay - rightDay)) {
     const entries = data.menu.filter((entry) => entry.day === day);
+    const signature = JSON.stringify(entries.map((entry) => [entry.mealTime, entry.recipeId ?? entry.recipeName]).sort());
+    const previous = menuGroups.at(-1);
+    if (previous && previous.lastDay + 1 === day && previous.signature === signature) previous.lastDay = day;
+    else menuGroups.push({ firstDay: day, lastDay: day, signature, entries });
+  }
+  for (const { firstDay, lastDay, entries } of menuGroups) {
     ensure(22 + entries.length * 16);
-    doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.primary).text(`Día ${day}`, left);
+    const label = firstDay === lastDay ? `Día ${firstDay}` : `Días ${firstDay}-${lastDay}`;
+    doc.font('Helvetica-Bold').fontSize(10).fillColor(colors.primary).text(label, left);
     for (const entry of entries) {
       const y = doc.y + 2;
       doc.font('Helvetica-Bold').fontSize(9.5).fillColor(colors.muted).text(mealTimeLabel(entry.mealTime), left + 10, y, { width: 80 });
@@ -81,8 +90,17 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
   ensure(60);
   doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(13).text('Recetas', left);
   doc.moveDown(0.4);
+  const preparations = new Map<string, ShoppingPdfData['recipes'][number]>();
+  for (const recipe of data.recipes) {
+    const instructions = recipe.instructions.map((step) => step.trim()).filter(Boolean);
+    const key = JSON.stringify([recipe.baseRecipeId ?? recipe.name.trim(), recipe.mealTime, instructions]);
+    const previous = preparations.get(key);
+    preparations.set(key, previous
+      ? { ...previous, name: previous.baseName ?? previous.name, personName: undefined }
+      : { ...recipe, name: recipe.baseName ?? recipe.name, instructions });
+  }
   for (const mealTime of mealTimes) {
-    const recipes = data.recipes.filter((recipe) => recipe.mealTime === mealTime);
+    const recipes = [...preparations.values()].filter((recipe) => recipe.mealTime === mealTime);
     if (!recipes.length) continue;
     ensure(60);
     doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(11).text(mealTimeLabel(mealTime), left);
@@ -108,7 +126,7 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
     }
   }
 
-  const columns = [{ x: left + 22, width: 200 }, { x: left + 226, width: 110 }, { x: left + 340, width: width - 340 }];
+  const columns = [{ x: left + 22, width: 145 }, { x: left + 171, width: 85 }, { x: left + 260, width: 137 }, { x: left + 401, width: width - 401 }];
   const rank = (group: string) => { const index = groupOrder.indexOf(group); return index === -1 ? groupOrder.length : index; };
   const groups = [...new Set(data.items.map((item) => item.group))].sort((a, b) => rank(a) - rank(b));
   doc.moveDown(0.6);
@@ -116,21 +134,29 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
   doc.font('Helvetica-Bold').fontSize(13).fillColor(colors.text).text('Lista', left);
   doc.moveDown(0.3);
   for (const group of groups) {
-    ensure(44);
+    ensure(62);
     const headerY = doc.y;
     doc.rect(left, headerY, width, 20).fill(colors.accent);
     doc.fillColor(colors.primary).font('Helvetica-Bold').fontSize(10).text(groupLabel(group).toUpperCase(), left + 8, headerY + 6, { characterSpacing: 0.6 });
     doc.y = headerY + 22;
+    const labelsY = doc.y;
+    for (const [index, label] of ['Producto', 'Cantidad', 'Comprar', 'Dónde comprar'].entries()) {
+      doc.fillColor(colors.muted).font('Helvetica-Bold').fontSize(8).text(label, columns[index].x, labelsY, { width: columns[index].width });
+    }
+    doc.y = labelsY + 16;
     for (const item of data.items.filter((entry) => entry.group === group)) {
       const buy = item.purchaseOptions.map((option) => `${amount(option.quantity, option.purchaseUnit)}${option.isApproximate ? ' aprox.' : ''}`).join(' · ');
       const buyText = buy || (item.purchasePending ? 'Empaque por confirmar' : '-');
-      const rowHeight = Math.max(18, doc.font('Helvetica').fontSize(9.5).heightOfString(item.name, { width: columns[0].width }) + 8);
+      const location = item.purchaseLocation ?? 'Supermercado';
+      const cells = [item.name, amount(item.quantity, item.unit), buyText, location];
+      const rowHeight = Math.max(18, ...cells.map((text, index) => doc.font(index === 2 && buy ? 'Helvetica-Bold' : 'Helvetica').fontSize(9).heightOfString(text, { width: columns[index].width }) + 10));
       ensure(rowHeight);
       const y = doc.y;
       doc.lineWidth(0.8).strokeColor(colors.muted).rect(left + 6, y + 4, 9, 9).stroke();
-      doc.fillColor(colors.text).font('Helvetica').fontSize(9.5).text(item.name, columns[0].x, y + 4, { width: columns[0].width });
+      doc.fillColor(colors.text).font('Helvetica').fontSize(9).text(item.name, columns[0].x, y + 4, { width: columns[0].width });
       doc.text(amount(item.quantity, item.unit), columns[1].x, y + 4, { width: columns[1].width });
       doc.fillColor(buy ? colors.primary : item.purchasePending ? colors.warn : colors.muted).font(buy ? 'Helvetica-Bold' : 'Helvetica-Oblique').text(buyText, columns[2].x, y + 4, { width: columns[2].width });
+      doc.fillColor(colors.muted).font('Helvetica').text(location, columns[3].x, y + 4, { width: columns[3].width });
       doc.moveTo(left, y + rowHeight).lineTo(left + width, y + rowHeight).lineWidth(0.4).strokeColor(colors.line).stroke();
       doc.y = y + rowHeight;
     }

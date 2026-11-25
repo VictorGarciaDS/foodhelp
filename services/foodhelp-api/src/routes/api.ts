@@ -207,7 +207,7 @@ export function createApiRouter(): Router {
 
   router.get('/foods', async (_request, response) => {
     const result = await getPool().query(
-      `SELECT f.id, f.name, f.food_group AS "group", f.base_quantity AS "baseQuantity", f.unit,
+      `SELECT f.id, f.name, f.food_group AS "group", f.base_quantity AS "baseQuantity", f.unit, f.purchase_location AS "purchaseLocation",
               f.is_free_consumption AS "isFreeConsumption", f.portion_pending AS "portionPending", f.verified_at AS "verifiedAt",
               f.image_url AS "imageUrl", f.image_attribution AS "imageAttribution", f.image_license AS "imageLicense",
               COALESCE((SELECT jsonb_agg(jsonb_build_object(
@@ -227,7 +227,7 @@ export function createApiRouter(): Router {
       `INSERT INTO foodhelp.foods (name, food_group, base_quantity, unit, is_free_consumption, verified_at, portion_pending)
        VALUES ($1, $2, $3, $4, $5, CASE WHEN $6 THEN now() ELSE NULL END, $7)
         ON CONFLICT DO NOTHING
-       RETURNING id, name, food_group AS "group", base_quantity AS "baseQuantity", unit,
+      RETURNING id, name, food_group AS "group", base_quantity AS "baseQuantity", unit, purchase_location AS "purchaseLocation",
          is_free_consumption AS "isFreeConsumption", portion_pending AS "portionPending", verified_at AS "verifiedAt", '[]'::jsonb AS "purchaseUnits"`,
       [input.name, input.group, input.baseQuantity, input.unit, input.isFreeConsumption, input.verified, input.portionPending ?? false],
     );
@@ -752,7 +752,7 @@ export function createApiRouter(): Router {
 
     const foodIds = [...new Set([...ingredientTotals.values()].map((item) => item.foodId))];
     const foodResult = foodIds.length ? await getPool().query(
-      `SELECT f.id, f.name, f.food_group AS "group",
+      `SELECT f.id, f.name, f.food_group AS "group", f.purchase_location AS "purchaseLocation",
               COALESCE(jsonb_agg(jsonb_build_object(
                 'unitName', pu.unit_name, 'quantity', pu.quantity, 'unit', pu.ingredient_unit,
                 'purchaseQuantity', pu.purchase_quantity, 'purchaseUnit', pu.purchase_unit,
@@ -767,6 +767,7 @@ export function createApiRouter(): Router {
       foodId: item.foodId,
       name: (foods.get(item.foodId)?.name as string | undefined) ?? 'Alimento desconocido',
       group: (foods.get(item.foodId)?.group as string | undefined) ?? 'Otros',
+      purchaseLocation: foods.get(item.foodId)?.purchaseLocation ?? 'Supermercado',
       unit: item.unit,
       quantity: sumAmounts(item.quantities),
       purchaseOptions: ((foods.get(item.foodId)?.purchaseUnits ?? []) as { unitName: string; quantity: string; unit: string; purchaseQuantity: string; purchaseUnit: string; isConfirmed: boolean; isApproximate: boolean; roundUp: boolean }[])
@@ -795,12 +796,14 @@ export function createApiRouter(): Router {
     const menuSelections = 'meals' in input ? input.meals.flatMap((meal) => meal.recipeIds.map((recipeId, day) => ({ day: day + 1, mealTime: meal.mealTime, recipeId }))) : usage;
     const menu = menuSelections.flatMap((entry) => Array.from({ length: daysPerDish }, (_value, offset) => ({
       day: (entry.day - 1) * daysPerDish + offset + 1,
-      mealTime: entry.mealTime, recipeName: recipes.get(entry.recipeId)!.name as string,
+      mealTime: entry.mealTime, recipeName: recipes.get(entry.recipeId)!.name as string, recipeId: entry.recipeId,
     })));
     const selectedRecipes = recipeIds.map((id) => {
       const recipe = recipes.get(id)!;
       return { id, name: recipe.name, mealTime: recipe.mealTime, instructions: recipe.instructions ?? [],
-        ...('meals' in input ? { personName: profileNames.get(recipe.personId!) } : {}),
+        ...('meals' in input ? { personName: profileNames.get(recipe.personId!), baseRecipeId: recipe.baseRecipeId,
+          baseName: recipes.get(recipe.baseRecipeId ?? '')?.name,
+        } : {}),
       };
     });
     const totalDays = input.days * daysPerDish;

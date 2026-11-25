@@ -506,15 +506,15 @@ describe('catalog and prescription routes', () => {
         { foodId: freeFoodId, quantity: '1/2', unit: 'taza', isFreeConsumption: true, group: 'Verduras' },
       ],
     }))), rowCount: 12 });
-    database.query.mockResolvedValueOnce({ rows: [{ id: foodId, name: 'Tortilla', purchaseUnits: [] }, { id: freeFoodId, name: 'Espinaca', purchaseUnits: [] }], rowCount: 2 });
+    database.query.mockResolvedValueOnce({ rows: [{ id: foodId, name: 'Tortilla', purchaseLocation: 'Supermercado', purchaseUnits: [] }, { id: freeFoodId, name: 'Espinaca', purchaseLocation: 'Mercado', purchaseUnits: [] }], rowCount: 2 });
     const meals = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime, index) => ({ mealTime, recipeIds: recipeIds.slice(index * 3, index * 3 + 3) }));
     const response = await request('/shopping-list/calculate', 'POST', { days: 3, peopleCount: 2, participants: [{ personId, meals }] });
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       participantCount: 2,
       items: expect.arrayContaining([
-        { foodId, name: 'Tortilla', group: 'Otros', quantity: '48', unit: 'piezas', purchaseOptions: [], purchasePending: true },
-        { foodId: freeFoodId, name: 'Espinaca', group: 'Otros', quantity: '12', unit: 'tazas', purchaseOptions: [], purchasePending: true },
+        { foodId, name: 'Tortilla', group: 'Otros', quantity: '48', unit: 'piezas', purchaseLocation: 'Supermercado', purchaseOptions: [], purchasePending: true },
+        { foodId: freeFoodId, name: 'Espinaca', group: 'Otros', quantity: '12', unit: 'tazas', purchaseLocation: 'Mercado', purchaseOptions: [], purchasePending: true },
       ]),
     });
   });

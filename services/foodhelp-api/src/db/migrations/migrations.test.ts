@@ -6,6 +6,16 @@ import { describe, expect, it } from 'vitest';
 const schema = readFileSync(resolve(__dirname, '0001_foodhelp_schema.sql'), 'utf8');
 
 describe('foodhelp schema migration', () => {
+  it('classifies purchase locations automatically without modifying equivalences', () => {
+    const migration = readFileSync(resolve(__dirname, '0021_food_purchase_locations.sql'), 'utf8');
+    expect(migration).toContain('purchase_location text');
+    expect(migration).toContain('GENERATED ALWAYS AS');
+    expect(migration).toContain("food_group IN ('Frutas', 'Verduras')");
+    expect(migration).toContain("'%habits%'");
+    expect(migration).toContain("'%wp100%'");
+    expect(migration).toContain("ELSE 'Supermercado'");
+    expect(migration).not.toContain('UPDATE foodhelp.foods');
+  });
   it('adds only the confirmed new foods without replacing existing equivalences', () => {
     const migration = readFileSync(resolve(__dirname, '0020_requested_food_additions.sql'), 'utf8');
     expect(migration).toContain("'Leche deslactosada light', 'Lacteos', '1', 'taza'");

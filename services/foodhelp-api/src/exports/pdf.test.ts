@@ -16,6 +16,41 @@ async function render(data: ShoppingPdfData): Promise<Buffer> {
 }
 
 describe('shopping PDF', () => {
+  it('prints the purchase location next to each product', async () => {
+    const text = vi.spyOn(PDFDocument.prototype, 'text');
+    try {
+      await render({
+        personName: 'Familia', days: 1, peopleCount: 1, menu: [], recipes: [],
+        items: ['Mercado', 'Naturista', 'Supermercado'].map((purchaseLocation) => ({
+          name: `Producto ${purchaseLocation}`, group: 'Proteinas', unit: 'g', quantity: '100',
+          purchaseLocation, purchasePending: false, purchaseOptions: [],
+        })),
+      });
+      const texts = text.mock.calls.map(([value]) => String(value));
+      expect(texts).toContain('Dónde comprar');
+      for (const location of ['Mercado', 'Naturista', 'Supermercado']) expect(texts).toContain(location);
+    } finally { text.mockRestore(); }
+  });
+  it('prints identical preparations once and combines consecutive identical menu days', async () => {
+    const text = vi.spyOn(PDFDocument.prototype, 'text');
+    try {
+      await render({
+        personName: 'Familia', days: 4, peopleCount: 3, items: [],
+        menu: [1, 2, 3, 4].map((day) => ({ day, mealTime: 'Comida', recipeName: day <= 2 ? 'Pollo' : 'Pescado' })),
+        recipes: ['Patricia', 'Laura', 'Victor'].map((personName) => ({
+          id: personName, name: `Pollo de ${personName}`, baseRecipeId: 'base-pollo', baseName: 'Pollo', personName,
+          mealTime: 'Comida', instructions: ['Cocinar el pollo', 'Servir'],
+        })),
+      });
+      const texts = text.mock.calls.map(([value]) => String(value));
+      expect(texts).toContain('Días 1-2');
+      expect(texts).toContain('Días 3-4');
+      expect(texts).not.toContain('Día 2');
+      expect(texts.filter((value) => value === '1. Cocinar el pollo')).toHaveLength(1);
+      expect(texts.filter((value) => value === '2. Servir')).toHaveLength(1);
+      expect(texts.some((value) => value.includes('Pollo de '))).toBe(false);
+    } finally { text.mockRestore(); }
+  });
   it('identifies diners and adapted preparation steps for each profile', async () => {
     const text = vi.spyOn(PDFDocument.prototype, 'text');
     try {
