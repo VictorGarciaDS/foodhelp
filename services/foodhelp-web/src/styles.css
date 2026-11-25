@@ -1,3 +1,6 @@
+.shopping-profiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px; margin-bottom: 24px; align-items: end; }
+.shopping-profiles > * { min-width: 0; }
+.shopping-profile-summary { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-bottom: 16px; }
 :root {
   font-family: Aptos, "Segoe UI Variable", system-ui, sans-serif;
   color: #202b28;

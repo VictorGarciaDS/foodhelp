@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { calculateEquivalentSchema, createFoodSchema, foodPurchaseUnitsSchema, foodSchema, personSchema, prescriptionSchema, recipeDiscoverySchema, recipeEditSchema, shoppingPlanSchema, withZeroColacion, mealTimeLabel } from './index';
 
 describe('shared request contracts', () => {
+  it('accepts one shared base menu and defaults each profile to one diner', () => {
+    const meals = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime, recipeIds: ['00000000-0000-4000-8000-000000000002'] }));
+    const personId = '00000000-0000-4000-8000-000000000001';
+    const parsed = shoppingPlanSchema.parse({ days: 1, meals, participants: [{ personId }] });
+    expect(parsed.participants?.[0]).toMatchObject({ personId, peopleCount: 1 });
+    expect(shoppingPlanSchema.safeParse({ days: 1, meals }).success).toBe(true);
+    expect(shoppingPlanSchema.safeParse({ days: 1, meals, participants: [{ personId, peopleCount: 0 }] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 1, meals, participants: [{ personId }, { personId }] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 1, meals, participants: [{ personId, peopleCount: -1 }] }).success).toBe(false);
+    expect(shoppingPlanSchema.safeParse({ days: 2, meals, participants: [{ personId }] }).success).toBe(false);
+  });
   it('uses fixed prescription meal times and an accented snack label', () => {
     const prescription = { month: '2026-12', reviewed: true, indicatedOn: '2026-12-03', meals: [{ mealTime: 'Colacion', group: 'Frutas', equivalents: '0' }] };
     expect(prescriptionSchema.safeParse(prescription).success).toBe(true);

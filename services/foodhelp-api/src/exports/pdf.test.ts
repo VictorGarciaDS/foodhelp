@@ -16,6 +16,28 @@ async function render(data: ShoppingPdfData): Promise<Buffer> {
 }
 
 describe('shopping PDF', () => {
+  it('identifies diners and adapted preparation steps for each profile', async () => {
+    const text = vi.spyOn(PDFDocument.prototype, 'text');
+    try {
+      await render({
+        personName: 'Menu compartido', days: 1, peopleCount: 3,
+        participants: [{ personName: 'Patricia', peopleCount: 1 }, { personName: 'Laura', peopleCount: 2 }],
+        menu: [{ day: 1, mealTime: 'Comida', recipeName: 'Pollo base' }], items: [],
+        recipes: [
+          { id: 'patricia', name: 'Pollo', personName: 'Patricia', mealTime: 'Comida', instructions: ['Pasos de Patricia'] },
+          { id: 'laura', name: 'Pollo', personName: 'Laura', mealTime: 'Comida', instructions: ['Pasos de Laura'] },
+        ],
+      });
+      const texts = text.mock.calls.map(([value]) => String(value));
+      expect(texts).toContain('Patricia: 1 persona');
+      expect(texts).toContain('Laura: 2 personas');
+      expect(texts).toContain('Pollo · Patricia');
+      expect(texts).toContain('Pollo · Laura');
+      expect(texts).toContain('1. Pasos de Patricia');
+      expect(texts).toContain('1. Pasos de Laura');
+      expect(texts.indexOf('Comensales')).toBeLessThan(texts.indexOf('Menú'));
+    } finally { text.mockRestore(); }
+  });
   it('places saved steps between menu and list in meal order', async () => {
     const text = vi.spyOn(PDFDocument.prototype, 'text');
     try {

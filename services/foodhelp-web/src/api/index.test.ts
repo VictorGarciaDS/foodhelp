@@ -4,6 +4,17 @@ import { api } from './index';
 afterEach(() => vi.unstubAllGlobals());
 
 describe('cliente API same-origin', () => {
+  it('sends one set of base selections with independent diner counts per profile', async () => {
+    const plan = {
+      days: 1, daysPerDish: 2,
+      meals: ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime: mealTime as 'Desayuno' | 'Almuerzo' | 'Comida' | 'Cena', recipeIds: ['base-recipe'] })),
+      participants: [{ personId: 'patricia', peopleCount: 3 }, { personId: 'laura', peopleCount: 1 }, { personId: 'victor', peopleCount: 1 }],
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ items: [], participants: plan.participants, peopleCount: 5 }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.calculateShopping(plan)).resolves.toMatchObject({ peopleCount: 5 });
+    expect(fetchMock).toHaveBeenCalledWith('/api/shopping-list/calculate', expect.objectContaining({ body: JSON.stringify(plan) }));
+  });
   it('creates profiles without a manual recipe inheritance source', async () => {
     const person = { id: 'person-id', name: 'Nuevo', prescriptionComplete: false };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ person, inheritance: { copied: 2, drafts: 2 } }), { status: 201 }));

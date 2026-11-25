@@ -18,8 +18,9 @@ type ShoppingPdfItem = {
 };
 export type ShoppingPdfData = {
   personName: string; days: number; peopleCount: number;
+  participants?: { personName?: string; peopleCount?: number }[];
   menu: { day: number; mealTime: string; recipeName: string }[];
-  recipes: { id: string; name: string; mealTime: string; instructions: string[] }[];
+  recipes: { id: string; name: string; mealTime: string; instructions: string[]; personName?: string }[];
   items: ShoppingPdfItem[];
 };
 
@@ -49,6 +50,19 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
   doc.font('Helvetica').fontSize(11).text(`${data.personName} · ${data.days} ${data.days === 1 ? 'día' : 'días'} · ${data.peopleCount} ${data.peopleCount === 1 ? 'persona' : 'personas'}`, left, 60);
   doc.y = 120;
 
+  if (data.participants?.length) {
+    doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(13).text('Comensales', left);
+    doc.moveDown(0.3);
+    for (const participant of data.participants) {
+      const count = participant.peopleCount ?? 1;
+      const label = `${participant.personName ?? data.personName}: ${count} ${count === 1 ? 'persona' : 'personas'}`;
+      doc.font('Helvetica').fontSize(10);
+      ensure(doc.heightOfString(label, { width }) + 6);
+      doc.fillColor(colors.text).text(label, left, doc.y, { width });
+      doc.moveDown(0.2);
+    }
+    doc.moveDown(0.5);
+  }
   doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(13).text('Menú', left);
   doc.moveDown(0.4);
   for (const day of [...new Set(data.menu.map((entry) => entry.day))]) {
@@ -75,7 +89,8 @@ export function streamShoppingPdf(response: Response, data: ShoppingPdfData): vo
     doc.moveDown(0.3);
     for (const recipe of recipes) {
       ensure(50);
-      doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(10.5).text(recipe.name, left + 10, doc.y, { width: width - 10 });
+      const title = recipe.personName ? `${recipe.name} · ${recipe.personName}` : recipe.name;
+      doc.fillColor(colors.text).font('Helvetica-Bold').fontSize(10.5).text(title, left + 10, doc.y, { width: width - 10 });
       doc.moveDown(0.3);
       const instructions = recipe.instructions.map((instruction) => instruction.trim()).filter(Boolean);
       doc.font('Helvetica').fontSize(10);

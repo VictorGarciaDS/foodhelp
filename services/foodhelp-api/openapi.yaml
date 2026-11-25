@@ -138,15 +138,15 @@ paths:
         '422': { description: Personas no válidas }
   /shopping-list/calculate:
     post:
-      description: days indica menus distintos (1 a 3); daysPerDish indica cuantos dias se come cada menu (1 a 3, por defecto 1). Cada ingrediente se multiplica por peopleCount y daysPerDish antes de sumar. La respuesta days es days por daysPerDish.
+      description: Plan compartido con meals de recetas base y participants con personId y peopleCount por perfil (1 por defecto, 0 excluye). Si se omite participants se incluyen todos los perfiles con 1 comensal. days indica menus distintos (1 a 3) y daysPerDish su duracion (1 a 3). Resuelve copias enlazadas verificadas y suma cantidad adaptada por comensales del perfil por duracion. Mantiene el plan individual anterior por compatibilidad. No modifica datos.
       responses:
-        '200': { description: Lista exacta consolidada con dias totales, menuCount, daysPerDish y conversiones de compra compatibles }
+        '200': { description: Lista exacta consolidada con dias totales, participantes y comensales por perfil, menu comun y conversiones de compra compatibles }
         '404': { description: Persona seleccionada no encontrada }
         '409': { description: Receta no verificada o pendiente }
         '422': { description: Falta seleccionar receta en algún tiempo de comida }
   /shopping-list/pdf:
     post:
-      description: Acepta el mismo plan que shopping-list/calculate. Expande el calendario segun daysPerDish e incluye los pasos guardados una vez por receta, agrupados por tiempo de comida.
+      description: Acepta el mismo plan compartido o individual que shopping-list/calculate. Incluye comensales por perfil, calendario comun, preparaciones adaptadas identificadas por perfil y lista consolidada.
       responses:
         '200': { description: PDF con Menu, Recetas y Lista }
         '409': { description: Receta no verificada o pendiente }

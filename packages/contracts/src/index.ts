@@ -156,7 +156,7 @@ const shoppingMealSelectionSchema = z.object({
 }).refine((meal) => canRepeatShoppingMeal(meal.mealTime) || meal.recipeIds.every((recipeId, index) => index === 0 || recipeId !== meal.recipeIds[index - 1]), {
   path: ['recipeIds'], message: 'No repitas almuerzos ni comidas en días consecutivos.',
 });
-export const shoppingPlanSchema = z.object({
+const legacyShoppingPlanSchema = z.object({
   days: z.number().int().min(1).max(3),
   daysPerDish: z.number().int().min(1).max(3).default(1),
   peopleCount: z.number().int().min(1).max(31),
@@ -174,6 +174,31 @@ export const shoppingPlanSchema = z.object({
     });
   });
 });
+export const sharedShoppingPlanSchema = z.object({
+  days: z.number().int().min(1).max(3),
+  daysPerDish: z.number().int().min(1).max(3).default(1),
+  meals: z.array(shoppingMealSelectionSchema).min(4).max(5),
+  participants: z.array(z.object({
+    personId: z.string().uuid(), peopleCount: z.number().int().min(0).max(31).default(1),
+  })).min(1).max(31).optional(),
+}).superRefine((plan, context) => {
+  const times = plan.meals.map((meal) => meal.mealTime);
+  if (new Set(times).size !== times.length || mainMealTimes.some((mealTime) => !times.includes(mealTime))) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['meals'], message: 'Selecciona un platillo base por cada tiempo de comida.' });
+  }
+  plan.meals.forEach((meal, index) => {
+    if (meal.recipeIds.length !== plan.days) context.addIssue({ code: z.ZodIssueCode.custom, path: ['meals', index, 'recipeIds'], message: 'Selecciona un platillo base por menú.' });
+  });
+  if (plan.participants) {
+    if (new Set(plan.participants.map((participant) => participant.personId)).size !== plan.participants.length) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['participants'], message: 'No repitas un perfil.' });
+    }
+    if (!plan.participants.some((participant) => participant.peopleCount > 0)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['participants'], message: 'Incluye al menos una persona a la mesa.' });
+    }
+  }
+});
+export const shoppingPlanSchema = z.union([legacyShoppingPlanSchema, sharedShoppingPlanSchema]);
 export const suggestionsRequestSchema = z.object({
   weekStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), peopleIds: z.array(z.string().uuid()).min(1),
 });

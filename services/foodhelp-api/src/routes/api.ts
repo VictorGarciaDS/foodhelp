@@ -660,47 +660,92 @@ export function createApiRouter(): Router {
 
   async function calculateShoppingList(body: unknown) {
     const input = parseRequest(shoppingPlanSchema, body);
-    const participant = input.participants[0];
-    const person = await getPool().query<{ name: string }>('SELECT name FROM foodhelp.people WHERE id = $1', [participant.personId]);
-    if (!person.rowCount) throw new ApiError(404, 'NOT_FOUND', 'La persona seleccionada ya no existe.');
-
-    const recipeIds = [...new Set(participant.meals.flatMap((meal) => meal.recipeIds))];
-    const recipeResult = await getPool().query(
+    type ProfileSelection = { personId: string; peopleCount: number; meals: { mealTime: string; recipeIds: string[] }[] };
+    let participants: ProfileSelection[];
+    let profileNames: Map<string, string>;
+    let recipes: Map<string, { id: string; name: string; personId: string | null; mealTime: string; ingredients: RecipeEdit['ingredients']; instructions?: string[]; verifiedAt?: unknown; baseRecipeId?: string | null }>;
+    if ('meals' in input) {
+      const requested = input.participants?.map((participant) => ({ personId: participant.personId, peopleCount: participant.peopleCount ?? 1 }))
+        .filter((participant) => participant.peopleCount > 0);
+      const people = await getPool().query<{ id: string; name: string }>(
+        `SELECT id, name FROM foodhelp.people ${requested ? 'WHERE id = ANY($1::uuid[])' : ''} ORDER BY created_at`,
+        requested ? [requested.map((participant) => participant.personId)] : [],
+      );
+      profileNames = new Map(people.rows.map((person) => [person.id, person.name]));
+      const profiles = requested ?? people.rows.map((person) => ({ personId: person.id, peopleCount: 1 }));
+      if (!profiles.length || profiles.some((profile) => !profileNames.has(profile.personId))) throw new ApiError(404, 'NOT_FOUND', 'Uno de los perfiles seleccionados ya no existe.');
+      const baseIds = [...new Set(input.meals.flatMap((meal) => meal.recipeIds))];
+      const result = await getPool().query(
+        `SELECT id, name, person_id AS "personId", meal_time AS "mealTime", ingredients, instructions,
+          verified_at AS "verifiedAt", inherited_from_recipe_id AS "baseRecipeId"
+         FROM foodhelp.recipes WHERE id = ANY($1::uuid[])
+           OR (person_id = ANY($2::uuid[]) AND inherited_from_recipe_id = ANY($1::uuid[]))`,
+        [baseIds, profiles.map((profile) => profile.personId)],
+      );
+      recipes = new Map(result.rows.map((recipe) => [recipe.id, recipe]));
+      const copies = new Map(result.rows.filter((recipe) => recipe.personId !== null && recipe.baseRecipeId)
+        .map((recipe) => [`${recipe.personId}\u0000${recipe.baseRecipeId}`, recipe]));
+      participants = profiles.map((profile) => ({ ...profile, meals: input.meals.map((meal) => ({
+        mealTime: meal.mealTime,
+        recipeIds: meal.recipeIds.map((baseId) => {
+          const base = recipes.get(baseId);
+          if (!base || base.personId !== null || base.mealTime !== meal.mealTime) throw new ApiError(422, 'VALIDATION_ERROR', 'Selecciona recetas base del tiempo de comida correspondiente.');
+          if (!base.verifiedAt) throw new ApiError(409, 'MENU_BLOCKED', `La receta base "${base.name}" no está verificada.`);
+          const copy = copies.get(`${profile.personId}\u0000${baseId}`);
+          if (!copy || !copy.verifiedAt || copy.mealTime !== meal.mealTime) {
+            throw new ApiError(409, 'MENU_BLOCKED', `${profileNames.get(profile.personId)}: "${base.name}" no tiene una copia adaptada y verificada para este tiempo de comida.`);
+          }
+          return copy.id as string;
+        }),
+      })) }));
+    } else {
+      const participant = input.participants[0];
+      const person = await getPool().query<{ name: string }>('SELECT name FROM foodhelp.people WHERE id = $1', [participant.personId]);
+      if (!person.rowCount) throw new ApiError(404, 'NOT_FOUND', 'La persona seleccionada ya no existe.');
+      profileNames = new Map([[participant.personId, person.rows[0].name]]);
+      participants = [{ ...participant, peopleCount: input.peopleCount }];
+      const recipeIds = [...new Set(participant.meals.flatMap((meal) => meal.recipeIds))];
+      const recipeResult = await getPool().query(
       `SELECT id, name, person_id AS "personId", meal_time AS "mealTime", ingredients, instructions
        FROM foodhelp.recipes WHERE id = ANY($1::uuid[]) AND verified_at IS NOT NULL`, [recipeIds],
-    );
-    const recipes = new Map(recipeResult.rows.map((recipe) => [recipe.id as string, recipe]));
+      );
+      recipes = new Map(recipeResult.rows.map((recipe) => [recipe.id as string, recipe]));
+    }
+    const recipeIds = [...new Set(participants.flatMap((participant) => participant.meals.flatMap((meal) => meal.recipeIds)))];
+    const peopleCount = participants.reduce((total, participant) => total + participant.peopleCount, 0);
     const daysPerDish = input.daysPerDish ?? 1;
-    const servings = input.peopleCount * daysPerDish;
     const ingredientTotals = new Map<string, { foodId: string; quantities: string[]; unit: string }>();
     const usage: { personId: string; mealTime: string; recipeId: string; day: number; peopleCount: number }[] = [];
 
-    for (let day = 0; day < input.days; day += 1) {
-      for (const meal of participant.meals) {
-        const recipeId = meal.recipeIds[day];
-        if (!canRepeatShoppingMeal(meal.mealTime) && day > 0 && recipeId === meal.recipeIds[day - 1]) throw new ApiError(422, 'VALIDATION_ERROR', 'Elige un almuerzo o comida distinto al del día anterior.');
-        const recipe = recipes.get(recipeId);
-        if (!recipe) throw new ApiError(409, 'MENU_BLOCKED', 'Todas las recetas deben tener ingredientes completos y verificados antes de calcular compras.');
-        if (recipe.personId !== participant.personId || recipe.mealTime !== meal.mealTime) {
-          throw new ApiError(422, 'VALIDATION_ERROR', 'La receta debe estar verificada para esa persona y ese tiempo de comida.');
-        }
-        usage.push({ personId: participant.personId, mealTime: meal.mealTime, recipeId, day: day + 1, peopleCount: input.peopleCount });
-        for (const ingredient of recipe.ingredients as { foodId: string; quantity: string | null; unit: string | null; isFreeConsumption: boolean; group: string }[]) {
-          if (ingredient.quantity === null && ingredient.unit === null) {
-            if (ingredient.isFreeConsumption && ingredient.group === 'Verduras') {
-              const key = `${ingredient.foodId}\u0000porciones`;
-              const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: 'porciones' };
-              item.quantities.push(String(servings));
-              ingredientTotals.set(key, item);
-            }
-            continue;
+    for (const participant of participants) {
+      const servings = participant.peopleCount * daysPerDish;
+      for (let day = 0; day < input.days; day += 1) {
+        for (const meal of participant.meals) {
+          const recipeId = meal.recipeIds[day];
+          if (!canRepeatShoppingMeal(meal.mealTime) && day > 0 && recipeId === meal.recipeIds[day - 1]) throw new ApiError(422, 'VALIDATION_ERROR', 'Elige un almuerzo o comida distinto al del día anterior.');
+          const recipe = recipes.get(recipeId);
+          if (!recipe) throw new ApiError(409, 'MENU_BLOCKED', 'Todas las recetas deben tener ingredientes completos y verificados antes de calcular compras.');
+          if (recipe.personId !== participant.personId || recipe.mealTime !== meal.mealTime) {
+            throw new ApiError(422, 'VALIDATION_ERROR', 'La receta debe estar verificada para esa persona y ese tiempo de comida.');
           }
-          if (!ingredient.quantity || !ingredient.unit) throw new ApiError(409, 'MENU_BLOCKED', 'Un ingrediente de receta contiene solo cantidad o unidad.');
-          const unit = canonicalUnit(ingredient.unit);
-          const key = `${ingredient.foodId}\u0000${unit}`;
-          const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit };
-          item.quantities.push(multiplyAmount(ingredient.quantity, servings));
-          ingredientTotals.set(key, item);
+          usage.push({ personId: participant.personId, mealTime: meal.mealTime, recipeId, day: day + 1, peopleCount: participant.peopleCount });
+          for (const ingredient of recipe.ingredients) {
+            if (ingredient.quantity === null && ingredient.unit === null) {
+              if (ingredient.isFreeConsumption && ingredient.group === 'Verduras') {
+                const key = `${ingredient.foodId}\u0000porciones`;
+                const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit: 'porciones' };
+                item.quantities.push(String(servings));
+                ingredientTotals.set(key, item);
+              }
+              continue;
+            }
+            if (!ingredient.quantity || !ingredient.unit) throw new ApiError(409, 'MENU_BLOCKED', 'Un ingrediente de receta contiene solo cantidad o unidad.');
+            const unit = canonicalUnit(ingredient.unit);
+            const key = `${ingredient.foodId}\u0000${unit}`;
+            const item = ingredientTotals.get(key) ?? { foodId: ingredient.foodId, quantities: [], unit };
+            item.quantities.push(multiplyAmount(ingredient.quantity, servings));
+            ingredientTotals.set(key, item);
+          }
         }
       }
     }
@@ -747,16 +792,22 @@ export function createApiRouter(): Router {
       purchasePending: !((foods.get(item.foodId)?.purchaseUnits ?? []) as { isConfirmed: boolean; unit: string }[])
         .some((purchaseUnit) => purchaseUnit.isConfirmed && canonicalUnit(purchaseUnit.unit) === item.unit),
     })).sort((left, right) => left.name.localeCompare(right.name, 'es') || left.unit.localeCompare(right.unit, 'es'));
-    const menu = usage.flatMap((entry) => Array.from({ length: daysPerDish }, (_value, offset) => ({
+    const menuSelections = 'meals' in input ? input.meals.flatMap((meal) => meal.recipeIds.map((recipeId, day) => ({ day: day + 1, mealTime: meal.mealTime, recipeId }))) : usage;
+    const menu = menuSelections.flatMap((entry) => Array.from({ length: daysPerDish }, (_value, offset) => ({
       day: (entry.day - 1) * daysPerDish + offset + 1,
       mealTime: entry.mealTime, recipeName: recipes.get(entry.recipeId)!.name as string,
     })));
     const selectedRecipes = recipeIds.map((id) => {
       const recipe = recipes.get(id)!;
-      return { id, name: recipe.name as string, mealTime: recipe.mealTime as string, instructions: (recipe.instructions ?? []) as string[] };
+      return { id, name: recipe.name, mealTime: recipe.mealTime, instructions: recipe.instructions ?? [],
+        ...('meals' in input ? { personName: profileNames.get(recipe.personId!) } : {}),
+      };
     });
     const totalDays = input.days * daysPerDish;
-    return { days: totalDays, menuCount: input.days, daysPerDish, participantCount: input.peopleCount, peopleCount: input.peopleCount, personName: person.rows[0].name, participants: [{ personId: participant.personId, days: totalDays }], usage, menu, recipes: selectedRecipes, items };
+    return { days: totalDays, menuCount: input.days, daysPerDish, participantCount: peopleCount, peopleCount,
+      personName: participants.length === 1 ? profileNames.get(participants[0].personId)! : 'Menú compartido',
+      participants: participants.map((participant) => ({ personId: participant.personId, personName: profileNames.get(participant.personId), peopleCount: participant.peopleCount, days: totalDays })),
+      usage, menu, recipes: selectedRecipes, items };
   }
 
   router.post('/shopping-list/calculate', async (request, response) => {

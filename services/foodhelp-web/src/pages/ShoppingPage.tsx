@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Button, Card, Field, Input, Select, Table, TableBody, TableCell, TableHeader, TableHeaderCell, TableRow } from '@fluentui/react-components';
 import { AddRegular, DocumentRegular, ShoppingBagRegular, WarningRegular } from '@fluentui/react-icons';
 import { canRepeatShoppingMeal, mainMealTimes, mealTimes, type Person } from '@foodhelp/contracts';
@@ -21,23 +21,20 @@ export function ShoppingPage() {
   const { data: people, busy: peopleBusy, error: peopleError } = useResource<Person[]>(() => api.listPeople(), 0);
   const { data: recipes, busy: recipesBusy, error: recipesError } = useResource<RecipeSummary[]>(() => api.listRecipes(), 0);
   const [menuDays, setMenuDays] = useState<MenuDay[]>([createDay()]);
-  const [personId, setPersonId] = useState('');
-  const [peopleCount, setPeopleCount] = useState('1');
+  const [profileCounts, setProfileCounts] = useState<Record<string, string>>({});
   const [daysPerDish, setDaysPerDish] = useState('1');
   const [result, setResult] = useState<GeneratedShoppingList | null>(null);
   const [busy, setBusy] = useState(false);
   const [lastPlan, setLastPlan] = useState<ShoppingPlan | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const availableRecipes = (recipes ?? []).filter((recipe) => recipe.verifiedAt !== null && recipe.personId !== null && recipe.mealTime !== null);
-
-  useEffect(() => {
-    if (!people?.length) { setPersonId(''); return; }
-    setPersonId((current) => people.some((person) => person.id === current) ? current : people[0].id);
-  }, [people]);
+  const availableRecipes = (recipes ?? []).filter((recipe) => recipe.verifiedAt !== null && recipe.personId === null && recipe.mealTime !== null);
+  const profiles = (people ?? []).map((person) => ({ ...person, count: profileCounts[person.id] ?? '1' }));
+  const peopleCount = profiles.reduce((total, profile) => total + (Number.isFinite(Number(profile.count)) ? Number(profile.count) : 0), 0);
+  const validCounts = profiles.length > 0 && profiles.every((profile) => profile.count.trim() !== '' && Number.isInteger(Number(profile.count)) && Number(profile.count) >= 0 && Number(profile.count) <= 31);
 
   const allMealsSelected = menuDays.length > 0 && menuDays.every((day) => mainMealTimes.every((mealTime) => Boolean(day.meals[mealTime])));
-  const canCalculate = Boolean(personId) && allMealsSelected && Number.isInteger(Number(peopleCount)) && Number(peopleCount) >= 1 && Number(peopleCount) <= 31 && !busy;
+  const canCalculate = validCounts && peopleCount > 0 && allMealsSelected && !busy;
 
   function resizeMenuDays(count: number) {
     if (!Number.isInteger(count) || count < 1 || count > 3) return;
@@ -65,7 +62,9 @@ export function ShoppingPage() {
     setBusy(true);
     try {
       const meals = mainMealTimes.map((mealTime) => ({ mealTime, recipeIds: menuDays.map((day) => day.meals[mealTime]) }));
-      const plan: ShoppingPlan = { days: menuDays.length, daysPerDish: Number(daysPerDish), peopleCount: Number(peopleCount), participants: [{ personId, meals }] };
+      const plan: ShoppingPlan = { days: menuDays.length, daysPerDish: Number(daysPerDish), meals,
+        participants: profiles.map((profile) => ({ personId: profile.id, peopleCount: Number(profile.count) })),
+      };
       setResult(await api.calculateShopping(plan));
       setLastPlan(plan);
     } catch (caught) {
@@ -86,17 +85,17 @@ export function ShoppingPage() {
             <SectionHeading detail={`${menuDays.length * Number(daysPerDish)} días de compras`}>Menús distintos</SectionHeading>
             <Field label="Días por platillo" required><Select value={daysPerDish} onChange={(event) => { setDaysPerDish(event.currentTarget.value); setResult(null); }}><option value="1">1</option><option value="2">2</option><option value="3">3</option></Select></Field>
             <Field label="Menús distintos" required><Select value={String(menuDays.length)} onChange={(event) => resizeMenuDays(Number(event.currentTarget.value))}><option value="1">1</option><option value="2">2</option><option value="3">3</option></Select></Field>
-            <Field label="Personas a la mesa" required><Input type="number" min="1" max="31" step="1" value={peopleCount} onChange={(_event, value) => { setPeopleCount(value.value); setResult(null); }} required /></Field>
-            <Field label="Perfil del menú" required><Select value={personId} onChange={(event) => { setPersonId(event.currentTarget.value); setMenuDays((current) => current.map((day) => ({ ...day, meals: emptyMeals() }))); setResult(null); }} required><option value="" disabled>Seleccionar perfil</option>{(people ?? []).map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</Select></Field>
           </div>
+          <SectionHeading detail={`${peopleCount} personas`}>Personas a la mesa</SectionHeading>
+          <div className="shopping-profiles">{profiles.map((profile) => <Field label={profile.name} key={profile.id} required><Input aria-label={`Personas a la mesa: ${profile.name}`} type="number" min="0" max="31" step="1" value={profile.count} onChange={(_event, value) => { setProfileCounts((current) => ({ ...current, [profile.id]: value.value })); setResult(null); }} required /></Field>)}</div>
           {menuDays.map((day, dayIndex) => <Card appearance="outline" className="shopping-participant" key={day.key}>
             <div className="shopping-planner-heading"><SectionHeading detail={`Días ${dayIndex * Number(daysPerDish) + 1} a ${(dayIndex + 1) * Number(daysPerDish)}`}>Menú {dayIndex + 1}</SectionHeading></div>
             <div className="shopping-meal-grid">{mainMealTimes.map((mealTime) => {
               const previousId = dayIndex && !canRepeatShoppingMeal(mealTime) ? menuDays[dayIndex - 1].meals[mealTime] : '';
-              const options = availableRecipes.filter((recipe) => recipe.personId === personId && recipe.mealTime === mealTime && recipe.id !== previousId);
+              const options = availableRecipes.filter((recipe) => recipe.mealTime === mealTime && recipe.id !== previousId);
               return <section className="shopping-meal" key={`${day.key}-${mealTime}`}>
                 <Field label={mealTime} required><Select value={day.meals[mealTime]} onChange={(event) => updateMeal(day.key, mealTime, event.currentTarget.value)} required><option value="" disabled>Seleccionar platillo</option>{options.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}</Select></Field>
-                {!options.length && <p className="shopping-no-recipes">{previousId ? 'No hay otra receta verificada disponible para evitar repetir.' : <>Sin recetas verificadas. <Link to="/recipes">Agrega una receta</Link>.</>}</p>}
+                {!options.length && <p className="shopping-no-recipes">{previousId ? 'No hay otra receta base verificada disponible para evitar repetir.' : <>Sin recetas base verificadas. <Link to="/recipes">Agrega una receta</Link>.</>}</p>}
               </section>;
             })}</div>
           </Card>)}
@@ -107,7 +106,7 @@ export function ShoppingPage() {
       {error && <p className="form-error" role="alert">{error}</p>}
       {result && <section className="content-section shopping-results">
         <div className="shopping-planner-heading"><SectionHeading detail={`${result.days} días · ${result.peopleCount} personas`}>Lista consolidada</SectionHeading><div className="action-row action-row-start"><Button icon={<DocumentRegular />} disabled={!lastPlan || !result.items.length || pdfBusy} onClick={async () => { if (!lastPlan) return; setPdfBusy(true); setError(null); try { await api.downloadShoppingPdf(lastPlan); } catch (caught) { setError(caught instanceof Error ? caught.message : 'No se pudo generar el PDF.'); } finally { setPdfBusy(false); } }}>{pdfBusy ? 'Generando PDF...' : 'PDF'}</Button></div></div>
-        <p className="field-note">Las cantidades incluyen a todos los comensales. Las verduras libres sin medida física se cuentan como porciones de receta.</p>
+        <div className="shopping-profile-summary">{result.participants.map((participant) => <span key={participant.personId}>{participant.personName ?? profiles.find((profile) => profile.id === participant.personId)?.name}: {participant.peopleCount ?? 1}</span>)}</div>
         {result.items.length ? <Card appearance="outline" className="table-frame"><Table aria-label="Lista de compras calculada"><TableHeader><TableRow><TableHeaderCell>Alimento</TableHeaderCell><TableHeaderCell>Cantidad total</TableHeaderCell><TableHeaderCell>Unidad</TableHeaderCell><TableHeaderCell>Compra</TableHeaderCell></TableRow></TableHeader><TableBody>{result.items.map((item) => <TableRow key={`${item.foodId}-${item.unit}`}><TableCell>{item.name}</TableCell><TableCell>{amountForDisplay(item.quantity)}</TableCell><TableCell>{item.unit}</TableCell><TableCell>{[...item.purchaseOptions.map((option) => `${option.quantity} ${purchaseUnitForDisplay(option.quantity, option.purchaseUnit)}${option.isApproximate ? ' aprox.' : ''} (${amountForDisplay(option.contents)} ${option.unit})`), ...(item.purchasePending ? ['Empaque por confirmar'] : [])].join(' · ') || '—'}</TableCell></TableRow>)}</TableBody></Table></Card> : <Card appearance="outline" className="empty-inline"><ShoppingBagRegular /><strong>La selección no requiere ingredientes medidos</strong><span>Los ingredientes libres sin cantidad física no se pueden sumar a la compra.</span></Card>}
       </section>}
     </PageFrame>

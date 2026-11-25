@@ -42,6 +42,95 @@ describe('catalog and prescription routes', () => {
     return request('/equivalents/calculate', 'POST', { foodId: '00000000-0000-4000-8000-000000000001', quantity: '2', unit });
   }
 
+  function sharedShoppingFixture(menuCount = 1) {
+    const profiles = ['Patricia', 'Laura', 'Victor'].map((name, index) => ({ id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, name }));
+    const foodId = '00000000-0000-4000-8000-000000000004';
+    const bases = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].flatMap((mealTime, index) => Array.from({ length: menuCount }, (_value, day) => ({
+      id: `00000000-0000-4000-8000-${String(index * 3 + day + 10).padStart(12, '0')}`,
+      name: `${mealTime} base ${day + 1}`, personId: null, mealTime, verifiedAt: '2026-10-05T12:00:00Z',
+      instructions: ['Pasos base'], ingredients: [{ foodId, quantity: '999', unit: 'piezas', group: 'Cereales y leguminosas', isFreeConsumption: false }],
+    })));
+    const quantities = [['1/3', '2/3'], ['1/2', '1'], ['1', '2']];
+    const copies = profiles.flatMap((person, profileIndex) => bases.map((base, baseIndex) => ({
+      ...base, id: `00000000-0000-4000-8000-${String(profileIndex * 30 + baseIndex + 100).padStart(12, '0')}`,
+      name: `Nombre personalizado ${profileIndex}`, personId: person.id, baseRecipeId: base.id,
+      instructions: [`Pasos de ${person.name}`], ingredients: [{ ...base.ingredients[0], quantity: quantities[profileIndex][baseIndex % menuCount] }],
+    })));
+    const meals = ['Desayuno', 'Almuerzo', 'Comida', 'Cena'].map((mealTime) => ({ mealTime, recipeIds: bases.filter((base) => base.mealTime === mealTime).map((base) => base.id) }));
+    return { profiles, bases, copies, meals, foodId };
+  }
+
+  function mockSharedShopping(fixture: ReturnType<typeof sharedShoppingFixture>, recipeRows = [...fixture.bases, ...fixture.copies]) {
+    database.query.mockResolvedValueOnce({ rows: fixture.profiles, rowCount: fixture.profiles.length });
+    database.query.mockResolvedValueOnce({ rows: recipeRows, rowCount: recipeRows.length });
+    database.query.mockResolvedValueOnce({ rows: [{ id: fixture.foodId, name: 'Ingrediente comun', group: 'Cereales y leguminosas', purchaseUnits: [
+      { unitName: 'paquetes', quantity: '12', unit: 'piezas', purchaseQuantity: '1', purchaseUnit: 'paquetes', isConfirmed: true, isApproximate: false, roundUp: true },
+    ] }], rowCount: 1 });
+  }
+
+  it.each([
+    { counts: [1, 1, 1], menus: 1, duration: 1, total: '22/3', packages: '1' },
+    { counts: [3, 1, 1], menus: 1, duration: 2, total: '20', packages: '2' },
+    { counts: [1, 2, 1], menus: 1, duration: 2, total: '56/3', packages: '2' },
+    { counts: [1, 1, 1], menus: 2, duration: 2, total: '44', packages: '4' },
+  ])('sums adapted copies for shared menus and profile counts $counts over $duration days', async ({ counts, menus, duration, total, packages }) => {
+    const fixture = sharedShoppingFixture(menus);
+    mockSharedShopping(fixture);
+    const response = await request('/shopping-list/calculate', 'POST', {
+      days: menus, daysPerDish: duration, meals: fixture.meals,
+      participants: fixture.profiles.map((profile, index) => ({ personId: profile.id, peopleCount: counts[index] })),
+    });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.items[0]).toMatchObject({ quantity: total, purchaseOptions: [{ quantity: packages }] });
+    expect(result.peopleCount).toBe(counts.reduce((sum, count) => sum + count, 0));
+    expect(result.usage).toHaveLength(12 * menus);
+    expect(result.menu).toHaveLength(4 * menus * duration);
+    expect(result.participants.map((profile: { peopleCount: number }) => profile.peopleCount)).toEqual(counts);
+    expect(result.recipes[0]).toMatchObject({ personName: 'Patricia', instructions: ['Pasos de Patricia'] });
+    expect(database.query.mock.calls.some(([sql]) => /INSERT|UPDATE|DELETE/.test(sql))).toBe(false);
+  });
+
+  it('defaults all profiles to one diner when no profile list is provided', async () => {
+    const fixture = sharedShoppingFixture();
+    mockSharedShopping(fixture);
+    const response = await request('/shopping-list/calculate', 'POST', { days: 1, meals: fixture.meals });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.peopleCount).toBe(3);
+    expect(result.items[0].quantity).toBe('22/3');
+    expect(result.participants.every((profile: { peopleCount: number }) => profile.peopleCount === 1)).toBe(true);
+  });
+
+  it.each(['missing', 'draft', 'unlinked'])('blocks an unavailable adapted copy instead of using base quantities: %s', async (problem) => {
+    const fixture = sharedShoppingFixture();
+    const first = fixture.copies[0];
+    const copies = fixture.copies.filter((copy) => copy.id !== first.id);
+    if (problem === 'draft') copies.push({ ...first, verifiedAt: '' });
+    if (problem === 'unlinked') copies.push({ ...first, name: fixture.bases[0].name, baseRecipeId: '' });
+    mockSharedShopping(fixture, [...fixture.bases, ...copies]);
+    const response = await request('/shopping-list/calculate', 'POST', { days: 1, meals: fixture.meals });
+    expect(response.status).toBe(409);
+    const result = await response.json();
+    expect(result.error.message).toContain('Patricia');
+    expect(result.error.message).toContain(fixture.bases[0].name);
+    expect(database.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not require an adapted copy for a profile excluded with zero diners', async () => {
+    const fixture = sharedShoppingFixture();
+    mockSharedShopping(fixture, [...fixture.bases, ...fixture.copies.filter((copy) => copy.personId !== fixture.profiles[2].id)]);
+    const response = await request('/shopping-list/calculate', 'POST', {
+      days: 1, meals: fixture.meals,
+      participants: fixture.profiles.map((profile, index) => ({ personId: profile.id, peopleCount: index === 2 ? 0 : 1 })),
+    });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.peopleCount).toBe(2);
+    expect(result.items[0].quantity).toBe('10/3');
+    expect(result.participants).toHaveLength(2);
+  });
+
   it('creates a profile with base copies in draft without requiring a source profile or prescription', async () => {
     const personId = '00000000-0000-4000-8000-000000000001';
     const foodId = '00000000-0000-4000-8000-000000000002';
